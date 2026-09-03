@@ -82,7 +82,8 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let reader = ReaderView(book: book).environmentObject(self)
+        let reader = ReaderView(book: book)
+            .environmentObject(self)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -93,13 +94,19 @@ final class AppModel: ObservableObject {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
+        window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = true
         window.backgroundColor = .windowBackgroundColor
         window.contentViewController = NSHostingController(rootView: reader)
         window.center()
-        let delegate = ReaderWindowDelegate { [weak self] in
-            self?.readerWindows.removeValue(forKey: book.id)
-            self?.readerDelegates.removeValue(forKey: book.id)
+        let delegate = ReaderWindowDelegate { [weak self] closingWindow in
+            guard let self, self.readerWindows[book.id] === closingWindow else { return }
+            let retainedWindow = self.readerWindows[book.id]
+            let retainedDelegate = self.readerDelegates[book.id]
+            closingWindow.delegate = nil
+            self.readerWindows.removeValue(forKey: book.id)
+            self.readerDelegates.removeValue(forKey: book.id)
+            withExtendedLifetime((retainedWindow, retainedDelegate)) {}
         }
         window.delegate = delegate
         readerDelegates[book.id] = delegate

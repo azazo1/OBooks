@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import SwiftUI
 
 private enum ReaderPanel: Equatable {
@@ -27,7 +28,6 @@ private enum ReaderPanel: Equatable {
 }
 
 struct ReaderView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
 
@@ -53,7 +53,7 @@ struct ReaderView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            chromeBackground.ignoresSafeArea()
              ReaderMouseTracker {
                  revealChrome()
              }
@@ -118,7 +118,8 @@ struct ReaderView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 680)
-        .background(chromeBackground)        
+        .ignoresSafeArea(.container, edges: .top)
+        .background(chromeBackground)
         .onAppear {
             sectionIndex = initialSectionIndex
             progress = book.progressFraction
@@ -127,9 +128,11 @@ struct ReaderView: View {
              }
         }
         .onDisappear {
-            controller.send(.stopSpeech)
+            hideChromeTask?.cancel()
         }
-        .onExitCommand { dismiss() }
+        .onExitCommand {
+            NSApp.keyWindow?.performClose(nil)
+        }
     }
 
     private var topBar: some View {

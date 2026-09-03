@@ -110,6 +110,10 @@ struct ReaderWebView: NSViewRepresentable {
         return webView
     }
 
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.teardown(webView: webView)
+    }
+
     func updateNSView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
         coordinator.update(book: book, flow: flow, theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin, onProgress: onProgress, onBoundary: onBoundary, onSpeakingChanged: onSpeakingChanged, onAnnotation: onAnnotation, onNoteRequest: onNoteRequest)
@@ -159,6 +163,15 @@ struct ReaderWebView: NSViewRepresentable {
             self.onSpeakingChanged = onSpeakingChanged
             self.onAnnotation = onAnnotation
             self.onNoteRequest = onNoteRequest
+        }
+
+        func teardown(webView: WKWebView) {
+            speech.onRange = nil
+            speech.onFinished = nil
+            speech.onStateChanged = nil
+            speech.stop()
+            webView.navigationDelegate = nil
+            webView.configuration.userContentController.removeScriptMessageHandler(forName: "reader")
         }
 
         func loadSection(in webView: WKWebView, index: Int) {

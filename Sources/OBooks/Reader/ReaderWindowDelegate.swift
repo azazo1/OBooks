@@ -1,13 +1,17 @@
 import AppKit
 
 final class ReaderWindowDelegate: NSObject, NSWindowDelegate {
-    private let onClose: () -> Void
+    private let onClose: (NSWindow) -> Void
 
-    init(onClose: @escaping () -> Void) {
+    init(onClose: @escaping (NSWindow) -> Void) {
         self.onClose = onClose
     }
 
     func windowWillClose(_ notification: Notification) {
-        onClose()
+        guard let window = notification.object as? NSWindow else { return }
+        let close = onClose
+        DispatchQueue.main.async {
+            close(window)
+        }
     }
 }
