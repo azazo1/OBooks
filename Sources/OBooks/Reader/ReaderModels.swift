@@ -41,8 +41,14 @@ enum ReaderAction: Equatable {
     case previousPage
     case toggleSpeech
     case stopSpeech
+    case speakText(String)
 }
 
+struct ReaderAnnotation: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+    let kind: String
+}
 struct ReaderCommand: Equatable, Identifiable {
     let id = UUID()
     let action: ReaderAction

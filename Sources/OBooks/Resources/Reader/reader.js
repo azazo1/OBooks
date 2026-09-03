@@ -33,7 +33,7 @@
             window.scrollTo({ top: Math.min(max, Math.max(0, current + direction * amount)), behavior: "smooth" });
         }
     };
-    const clearHighlight = () => document.querySelectorAll("[data-obooks-highlight]").forEach((node) => {
+    const clearHighlight = () => document.querySelectorAll("[data-obooks-speech-highlight]").forEach((node) => {
         const parent = node.parentNode;
         if (!parent) return;
         while (node.firstChild) parent.insertBefore(node.firstChild, node);
@@ -42,7 +42,7 @@
     });
     const readableText = () => {
         const clone = document.body.cloneNode(true);
-        clone.querySelectorAll("script,style,[data-obooks-highlight]").forEach((node) => node.remove());
+        clone.querySelectorAll("script,style,[data-obooks-highlight],[data-obooks-speech-highlight]").forEach((node) => node.remove());
         return (clone.innerText || clone.textContent || "").trim();
     };
     const highlight = (start, length) => {
@@ -76,6 +76,8 @@
         const mark = document.createElement("span");
         mark.dataset.obooksHighlight = "true";
         mark.className = "obooks-speech-highlight";
+         delete mark.dataset.obooksHighlight;
+         mark.dataset.obooksSpeechHighlight = "true";
         try {
             mark.appendChild(range.extractContents());
             range.insertNode(mark);
@@ -84,6 +86,55 @@
             clearHighlight();
         }
     };
+    let selectionText = () => window.getSelection()?.toString().trim() || "";
+    const removeMenu = () => document.querySelector(".obooks-context-menu")?.remove();
+    const rangeHighlight = () => {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+        const text = selectionText();
+        const range = selection.getRangeAt(0);
+        const mark = document.createElement("mark");
+        mark.className = "obooks-user-highlight";
+        mark.dataset.obooksHighlight = "true";
+        try {
+            mark.appendChild(range.extractContents());
+            range.insertNode(mark);
+            post({ type: "annotation", kind: "highlight", text });
+            selection.removeAllRanges();
+        } catch (_) {}
+        removeMenu();
+    };
+    const showMenu = (event) => {
+        removeMenu();
+        const text = selectionText();
+        if (!text) return;
+        event.preventDefault();
+        const menu = document.createElement("div");
+        menu.className = "obooks-context-menu";
+        menu.innerHTML = `
+            <button data-action="highlight"><span>●</span> 高亮</button>
+            <button data-action="note"><span>✎</span> 添加笔记</button>
+            <button data-action="speak"><span>◖</span> 从此处开始朗读</button>
+        `;
+        menu.style.left = `${Math.min(event.clientX, window.innerWidth - 190)}px`;
+        menu.style.top = `${Math.min(event.clientY, window.innerHeight - 138)}px`;
+        menu.addEventListener("click", (clickEvent) => {
+            const action = clickEvent.target.closest("button")?.dataset.action;
+            if (action === "highlight") rangeHighlight();
+            if (action === "note") {
+                post({ type: "noteRequest", text });
+                removeMenu();
+            }
+            if (action === "speak") {
+                post({ type: "annotation", kind: "speech", text });
+                removeMenu();
+            }
+        });
+        document.body.appendChild(menu);
+    };
+    document.addEventListener("contextmenu", showMenu);
+    document.addEventListener("click", removeMenu);
+
     window.obooksReader = {
         setSettings(settings) {
             root().dataset.flow = settings.flow;

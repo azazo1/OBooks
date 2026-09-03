@@ -91,6 +91,8 @@ struct ReaderWebView: NSViewRepresentable {
     let onProgress: (Double) -> Void
     let onBoundary: (Int) -> Void
     let onSpeakingChanged: (Bool) -> Void
+    let onAnnotation: (String, String) -> Void
+    let onNoteRequest: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -103,14 +105,14 @@ struct ReaderWebView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
-        context.coordinator.update(book: book, flow: flow, theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin, onProgress: onProgress, onBoundary: onBoundary, onSpeakingChanged: onSpeakingChanged)
+        context.coordinator.update(book: book, flow: flow, theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin, onProgress: onProgress, onBoundary: onBoundary, onSpeakingChanged: onSpeakingChanged, onAnnotation: onAnnotation, onNoteRequest: onNoteRequest)
         context.coordinator.loadSection(in: webView, index: sectionIndex)
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
-        coordinator.update(book: book, flow: flow, theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin, onProgress: onProgress, onBoundary: onBoundary, onSpeakingChanged: onSpeakingChanged)
+        coordinator.update(book: book, flow: flow, theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin, onProgress: onProgress, onBoundary: onBoundary, onSpeakingChanged: onSpeakingChanged, onAnnotation: onAnnotation, onNoteRequest: onNoteRequest)
         if coordinator.currentSectionIndex != sectionIndex { coordinator.loadSection(in: webView, index: sectionIndex) }
         if coordinator.lastCommandID != controller.command?.id, let command = controller.command {
             coordinator.execute(command.action, in: webView)
@@ -134,6 +136,8 @@ struct ReaderWebView: NSViewRepresentable {
         private var onProgress: (Double) -> Void = { _ in }
         private var onBoundary: (Int) -> Void = { _ in }
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
+        private var onAnnotation: (String, String) -> Void = { _, _ in }
+        private var onNoteRequest: (String) -> Void = { _ in }
 
         struct Settings: Equatable {
             let flow: ReadingFlow
@@ -143,7 +147,7 @@ struct ReaderWebView: NSViewRepresentable {
             let margin: Double
         }
 
-        func update(book: BookSummary, flow: ReadingFlow, theme: ReadingTheme, fontSize: Double, lineHeight: Double, margin: Double, onProgress: @escaping (Double) -> Void, onBoundary: @escaping (Int) -> Void, onSpeakingChanged: @escaping (Bool) -> Void) {
+        func update(book: BookSummary, flow: ReadingFlow, theme: ReadingTheme, fontSize: Double, lineHeight: Double, margin: Double, onProgress: @escaping (Double) -> Void, onBoundary: @escaping (Int) -> Void, onSpeakingChanged: @escaping (Bool) -> Void, onAnnotation: @escaping (String, String) -> Void, onNoteRequest: @escaping (String) -> Void) {
             currentBook = book
             self.flow = flow
             self.theme = theme
@@ -153,6 +157,8 @@ struct ReaderWebView: NSViewRepresentable {
             self.onProgress = onProgress
             self.onBoundary = onBoundary
             self.onSpeakingChanged = onSpeakingChanged
+            self.onAnnotation = onAnnotation
+            self.onNoteRequest = onNoteRequest
         }
 
         func loadSection(in webView: WKWebView, index: Int) {
@@ -171,6 +177,12 @@ struct ReaderWebView: NSViewRepresentable {
             case .stopSpeech:
                 speech.stop()
                 webView.evaluateJavaScript("window.obooksReader?.clearHighlight();")
+            case .speakText(let text):
+                speech.stop()
+                speech.onStateChanged = { [weak self] speaking in
+                    self?.onSpeakingChanged(speaking)
+                }
+                speech.speak(text: text)
             }
         }
 
@@ -187,6 +199,10 @@ struct ReaderWebView: NSViewRepresentable {
             case "progress": onProgress((body["fraction"] as? NSNumber)?.doubleValue ?? 0)
             case "boundary": onBoundary((body["direction"] as? NSNumber)?.intValue ?? 0)
             case "ready": if let webView = message.webView { applySettingsIfNeeded(in: webView) }
+            case "annotation":
+                onAnnotation(body["text"] as? String ?? "", body["kind"] as? String ?? "highlight")
+            case "noteRequest":
+                onNoteRequest(body["text"] as? String ?? "")
             default: break
             }
         }

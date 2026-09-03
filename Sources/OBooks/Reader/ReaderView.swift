@@ -28,6 +28,7 @@ private enum ReaderPanel: Equatable {
 
 struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
 
     let book: BookSummary
@@ -43,10 +44,20 @@ struct ReaderView: View {
     @State private var isBookmarked = false
     @State private var searchQuery = ""
     @State private var isSpeaking = false
+    @State private var chromeVisible = true
+    @State private var hideChromeTask: Task<Void, Never>?
+    @State private var annotations: [ReaderAnnotation] = []
+    @State private var noteContext = ""
+    @State private var noteText = ""
+    @State private var isEditingNote = false
 
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
+             ReaderMouseTracker {
+                 revealChrome()
+             }
+             .allowsHitTesting(false)
 
             ReaderWebView(
                 book: book,
@@ -66,9 +77,22 @@ struct ReaderView: View {
                 onBoundary: moveSection,
                 onSpeakingChanged: { value in
                     isSpeaking = value
+                },
+                onAnnotation: { text, kind in
+                    guard !text.isEmpty else { return }
+                    if kind == "speech" {
+                         controller.send(.speakText(text))
+                     } else {
+                         annotations.insert(ReaderAnnotation(text: text, kind: kind), at: 0)
+                     }
+                },
+                onNoteRequest: { text in
+                    noteContext = text
+                    noteText = ""
+                    isEditingNote = true
                 }
             )
-            .padding(.top, 45)
+            .padding(.top, 52)
             .padding(.bottom, 48)
 
             topBar
@@ -80,12 +104,27 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) {
             readerFooter
         }
+                .overlay {
+             ReaderMouseTracker {
+                 revealChrome()
+             }
+             .allowsHitTesting(false)
+         }
+         .overlay(alignment: .bottomTrailing) {
+            if isEditingNote {
+                noteEditor
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 58)
+            }
+        }
         .frame(minWidth: 980, minHeight: 680)
-        .background(Color.black)
-        .preferredColorScheme(.dark)
+        .background(chromeBackground)        
         .onAppear {
             sectionIndex = initialSectionIndex
             progress = book.progressFraction
+             if colorScheme == .light && theme == .focus {
+                 theme = .paper
+             }
         }
         .onDisappear {
             controller.send(.stopSpeech)
@@ -128,9 +167,12 @@ struct ReaderView: View {
             }
             .frame(width: 136, alignment: .trailing)
         }
-        .padding(.horizontal, 22)
-        .frame(height: 45)
-        .background(Color.black.opacity(0.92))
+        .padding(.leading, 82)
+         .padding(.trailing, 22)
+        .frame(height: 52)
+         .opacity(chromeVisible ? 1 : 0)
+         .animation(.easeOut(duration: 0.18), value: chromeVisible)
+        .background(chromeBackground.opacity(colorScheme == .dark ? 0.92 : 0.96))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.08))
@@ -167,7 +209,7 @@ struct ReaderView: View {
     @ViewBuilder
     private func panelView(_ panel: ReaderPanel) -> some View {
         panelContent(panel)
-            .padding(.top, 45)
+            .padding(.top, 52)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panel.isLeading ? .topLeading : .topTrailing)
     }
 
@@ -258,10 +300,30 @@ struct ReaderView: View {
     }
 
     private var highlightsContent: some View {
-        VStack(spacing: 0) {
-            panelEmpty(icon: "highlighter", title: "无高亮", message: "选中文字后可在这里查看")
-            Spacer()
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                if annotations.isEmpty {
+                    panelEmpty(icon: "highlighter", title: "无高亮", message: "选中文字后可在这里查看")
+                } else {
+                    ForEach(annotations) { annotation in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(annotation.kind == "note" ? "笔记" : "高亮", systemImage: annotation.kind == "note" ? "note.text" : "highlighter")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(OBooksPalette.accent)
+                            Text(annotation.text)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.78))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                    }
+                }
+            }
+            .padding(12)
         }
+        .scrollIndicators(.hidden)
     }
 
     private var searchContent: some View {
@@ -440,11 +502,58 @@ struct ReaderView: View {
         }
         .padding(.horizontal, 17)
         .frame(height: 42)
-        .background(Color.black.opacity(0.84), in: Capsule())
+        .background(chromeBackground.opacity(colorScheme == .dark ? 0.84 : 0.94), in: Capsule())
         .overlay {
             Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)
         }
         .padding(.bottom, 10)
+         .opacity(chromeVisible ? 1 : 0)
+         .animation(.easeOut(duration: 0.18), value: chromeVisible)
+    }
+
+    private var noteEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("添加笔记")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button {
+                    isEditingNote = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .buttonStyle(.plain)
+            }
+            Text(noteContext)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+            TextEditor(text: $noteText)
+                .font(.system(size: 12))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(width: 270, height: 82)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+            Button("保存笔记") {
+                guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                annotations.insert(ReaderAnnotation(text: noteText, kind: "note"), at: 0)
+                isEditingNote = false
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 300)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
+    }
+
+    private var chromeBackground: Color {
+        colorScheme == .dark ? .black : Color(nsColor: .windowBackgroundColor)
     }
 
     private var progressLabel: String {
@@ -463,6 +572,16 @@ struct ReaderView: View {
     private var initialSectionIndex: Int {
         guard !book.spine.isEmpty else { return 0 }
         return min(book.spine.count - 1, Int(book.progressFraction * Double(book.spine.count)))
+    }
+
+    private func revealChrome() {
+        chromeVisible = true
+        hideChromeTask?.cancel()
+        hideChromeTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.8))
+            guard !Task.isCancelled else { return }
+            chromeVisible = false
+        }
     }
 
     private func togglePanel(_ panel: ReaderPanel) {

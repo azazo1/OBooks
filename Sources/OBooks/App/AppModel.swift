@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import OSLog
 import UniformTypeIdentifiers
+import SwiftUI
 
 struct AppAlert: Identifiable {
     let id = UUID()
@@ -18,6 +19,8 @@ final class AppModel: ObservableObject {
 
     let libraryStore: LibraryStore
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
+    private var readerWindows: [UUID: NSWindow] = [:]
+    private var readerDelegates: [UUID: ReaderWindowDelegate] = [:]
 
     init() {
         let store = LibraryStore()
@@ -50,7 +53,7 @@ final class AppModel: ObservableObject {
             books.sort { $0.sortTitle.localizedStandardCompare($1.sortTitle) == .orderedAscending }
             libraryStore.save(books)
             selectedBookID = book.id
-            openBook = book
+            openReader(book)
             logger.info("导入完成: title=\(book.title, privacy: .public)")
         } catch {
             logger.error("导入失败: file=\(url.lastPathComponent, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
@@ -63,13 +66,46 @@ final class AppModel: ObservableObject {
               let book = books.first(where: { $0.id == selectedBookID }) else {
             return
         }
-        openBook = book
+        openReader(book)
     }
 
     func open(_ book: BookSummary) {
         selectedBookID = book.id
-        openBook = book
         updateLastOpened(book.id)
+        openReader(book)
+    }
+
+    func openReader(_ book: BookSummary) {
+        if let window = readerWindows[book.id] {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let reader = ReaderView(book: book).environmentObject(self)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = book.title
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .windowBackgroundColor
+        window.contentViewController = NSHostingController(rootView: reader)
+        window.center()
+        let delegate = ReaderWindowDelegate { [weak self] in
+            self?.readerWindows.removeValue(forKey: book.id)
+            self?.readerDelegates.removeValue(forKey: book.id)
+        }
+        window.delegate = delegate
+        readerDelegates[book.id] = delegate
+        readerWindows[book.id] = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func updateProgress(bookID: UUID, fraction: Double) {

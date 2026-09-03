@@ -94,10 +94,6 @@ struct LibraryView: View {
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers)
         }
-        .sheet(item: $appModel.openBook) { book in
-            ReaderView(book: book)
-                .environmentObject(appModel)
-        }
         .alert("导入失败", isPresented: Binding(
             get: { appModel.alert != nil },
             set: { isPresented in
