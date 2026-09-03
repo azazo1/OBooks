@@ -1,6 +1,31 @@
 import Foundation
 import SwiftUI
 
+private enum ReaderPanel: Equatable {
+    case toc
+    case bookmarks
+    case highlights
+    case search
+    case settings
+
+    var title: String {
+        switch self {
+        case .toc: return "目录"
+        case .bookmarks: return "书签"
+        case .highlights: return "高亮标记和笔记"
+        case .search: return "搜索"
+        case .settings: return "主题与设置"
+        }
+    }
+
+    var isLeading: Bool {
+        switch self {
+        case .toc, .bookmarks: return true
+        case .highlights, .search, .settings: return false
+        }
+    }
+}
+
 struct ReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appModel: AppModel
@@ -10,17 +35,18 @@ struct ReaderView: View {
     @State private var sectionIndex = 0
     @State private var progress = 0.0
     @State private var flow: ReadingFlow = .paginated
-    @State private var theme: ReadingTheme = .paper
+    @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
     @State private var lineHeight = 1.7
     @State private var margin = 56.0
-    @State private var showTOC = false
-    @State private var showSettings = false
+    @State private var activePanel: ReaderPanel?
+    @State private var isBookmarked = false
+    @State private var searchQuery = ""
     @State private var isSpeaking = false
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color(nsColor: .underPageBackgroundColor).ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
             ReaderWebView(
                 book: book,
@@ -42,19 +68,21 @@ struct ReaderView: View {
                     isSpeaking = value
                 }
             )
-            .padding(.top, 54)
-            .padding(.bottom, 54)
+            .padding(.top, 45)
+            .padding(.bottom, 48)
 
-            readerToolbar
+            topBar
 
-            if showTOC {
-                tocPanel.transition(.move(edge: .leading).combined(with: .opacity))
+            if let activePanel {
+                panelView(activePanel)
             }
-
+        }
+        .overlay(alignment: .bottom) {
             readerFooter
         }
-        .frame(minWidth: 900, minHeight: 650)
-        .background(.black)
+        .frame(minWidth: 980, minHeight: 680)
+        .background(Color.black)
+        .preferredColorScheme(.dark)
         .onAppear {
             sectionIndex = initialSectionIndex
             progress = book.progressFraction
@@ -65,153 +93,371 @@ struct ReaderView: View {
         .onExitCommand { dismiss() }
     }
 
-    private var readerToolbar: some View {
+    private var topBar: some View {
         HStack(spacing: 14) {
-            Button { dismiss() } label: { Image(systemName: "xmark") }
-                .help("关闭阅读器")
-                .buttonStyle(.borderless)
-
-            Button {
-                withAnimation(.easeOut(duration: 0.18)) { showTOC.toggle() }
-            } label: { Image(systemName: "sidebar.left") }
-                .help("显示目录")
-                .buttonStyle(.borderless)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(book.title).font(.headline).lineLimit(1)
-                if book.spine.indices.contains(sectionIndex) {
-                    Text(book.spine[sectionIndex].title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
+            HStack(spacing: 13) {
+                readerButton(systemName: "list.bullet", help: "显示目录", panel: .toc)
+                readerButton(systemName: "books.vertical", help: "显示书签", panel: .bookmarks)
+                readerButton(systemName: "note.text", help: "显示高亮和笔记", panel: .highlights)
             }
+            .frame(width: 136, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            Menu {
-                Picker("阅读方式", selection: $flow) {
-                    ForEach(ReadingFlow.allCases) { item in Text(item.label).tag(item) }
-                }
-            } label: {
-                Image(systemName: flow == .paginated ? "rectangle.split.2x1" : "arrow.up.and.down.text.horizontal")
-            }
-            .help("切换阅读方式")
-            .menuStyle(.borderlessButton)
+            Text(book.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.86))
+                .lineLimit(1)
 
-            Menu {
-                Picker("主题", selection: $theme) {
-                    ForEach(ReadingTheme.allCases) { item in Text(item.label).tag(item) }
-                }
-            } label: {
-                Image(systemName: theme == .dark ? "moon" : "sun.max")
-            }
-            .help("切换主题")
-            .menuStyle(.borderlessButton)
+            Spacer(minLength: 12)
 
-            Button { controller.send(.toggleSpeech) } label: {
-                Image(systemName: isSpeaking ? "pause.fill" : "speaker.wave.2")
-            }
-            .help(isSpeaking ? "停止朗读" : "朗读当前章节")
-            .buttonStyle(.borderless)
-
-            Button { showSettings.toggle() } label: { Image(systemName: "textformat.size") }
-                .help("阅读设置")
-                .buttonStyle(.borderless)
-                .popover(isPresented: $showSettings, arrowEdge: .top) { settingsPanel }
-        }
-        .padding(.horizontal, 18)
-        .frame(height: 54)
-        .background(.regularMaterial)
-    }
-
-    private var readerFooter: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            HStack(spacing: 18) {
-                Button { controller.send(.previousPage) } label: { Image(systemName: "chevron.left") }
-                    .help("上一页")
-                    .buttonStyle(.borderless)
-                ProgressView(value: progress).frame(maxWidth: 380)
-                Text("\(Int(progress * 100))%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 42, alignment: .trailing)
-                Button { controller.send(.nextPage) } label: { Image(systemName: "chevron.right") }
-                    .help("下一页")
-                    .buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 22)
-            .frame(height: 54)
-            .frame(maxWidth: .infinity)
-            .background(.regularMaterial)
-        }
-        .frame(maxHeight: .infinity)
-        .allowsHitTesting(true)
-    }
-
-    private var tocPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("目录").font(.headline)
-                Spacer()
+            HStack(spacing: 15) {
+                readerButton(label: "大", help: "打开阅读设置", panel: .settings)
+                readerButton(systemName: "magnifyingglass", help: "搜索书籍", panel: .search)
                 Button {
-                    withAnimation(.easeOut(duration: 0.18)) { showTOC = false }
-                } label: { Image(systemName: "xmark") }
-                    .help("关闭目录")
-                    .buttonStyle(.borderless)
+                    isBookmarked.toggle()
+                    activePanel = isBookmarked ? .bookmarks : activePanel
+                } label: {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(isBookmarked ? OBooksPalette.accent : .white.opacity(0.78))
+                        .frame(width: 22, height: 26)
+                }
+                .buttonStyle(.plain)
+                .help(isBookmarked ? "移除本章书签" : "添加本章书签")
             }
-            .padding(16)
-            Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+            .frame(width: 136, alignment: .trailing)
+        }
+        .padding(.horizontal, 22)
+        .frame(height: 45)
+        .background(Color.black.opacity(0.92))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+        }
+    }
+
+    private func readerButton(systemName: String, help: String, panel: ReaderPanel) -> some View {
+        Button {
+            togglePanel(panel)
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
+                .frame(width: 22, height: 26)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    private func readerButton(label: String, help: String, panel: ReaderPanel) -> some View {
+        Button {
+            togglePanel(panel)
+        } label: {
+            Text(label)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
+                .frame(width: 22, height: 26)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private func panelView(_ panel: ReaderPanel) -> some View {
+        panelContent(panel)
+            .padding(.top, 45)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panel.isLeading ? .topLeading : .topTrailing)
+    }
+
+    @ViewBuilder
+    private func panelContent(_ panel: ReaderPanel) -> some View {
+        switch panel {
+        case .toc:
+            ReaderPanelSurface(title: panel.title, width: 286) {
+                tocContent
+            }
+        case .bookmarks:
+            ReaderPanelSurface(title: panel.title, width: 286) {
+                bookmarkContent
+            }
+        case .highlights:
+            ReaderPanelSurface(title: panel.title, width: 316) {
+                highlightsContent
+            }
+        case .search:
+            ReaderPanelSurface(title: panel.title, width: 286) {
+                searchContent
+            }
+        case .settings:
+            ReaderPanelSurface(title: panel.title, width: 306) {
+                settingsContent
+            }
+        }
+    }
+
+    private var tocContent: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                if book.toc.isEmpty {
+                    panelEmpty(icon: "list.bullet", title: "没有目录", message: "这本书没有提供目录")
+                } else {
                     ForEach(flatten(book.toc)) { entry in
                         Button {
                             if let index = sectionIndex(for: entry.item.href) {
                                 sectionIndex = index
-                                showTOC = false
+                                activePanel = nil
                             }
                         } label: {
                             Text(entry.item.label)
-                                .font(.callout)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.78))
                                 .multilineTextAlignment(.leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, CGFloat(16 + entry.depth * 12))
-                                .padding(.trailing, 16)
+                                .padding(.leading, CGFloat(14 + entry.depth * 12))
+                                .padding(.trailing, 14)
                                 .padding(.vertical, 8)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.vertical, 8)
             }
+            .padding(.vertical, 9)
         }
-        .frame(width: 290)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(.regularMaterial)
-        .shadow(color: .black.opacity(0.18), radius: 16, x: 4)
-        .padding(.top, 54)
-        .padding(.bottom, 54)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .scrollIndicators(.hidden)
     }
 
-    private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("阅读设置").font(.headline)
-            settingSlider(title: "字号", value: $fontSize, range: 12...32, step: 1, display: String(Int(fontSize)))
-            settingSlider(title: "行距", value: $lineHeight, range: 1.2...2.4, step: 0.1, display: String(format: "%.1f", lineHeight))
-            settingSlider(title: "边距", value: $margin, range: 24...100, step: 4, display: String(Int(margin)))
+    private var bookmarkContent: some View {
+        VStack(spacing: 0) {
+            if isBookmarked {
+                Button {
+                    activePanel = nil
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "bookmark.fill")
+                            .foregroundStyle(OBooksPalette.accent)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(currentChapterTitle)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.88))
+                            Text("当前位置")
+                                .font(.system(size: 11))
+                                .foregroundStyle(OBooksPalette.secondaryText)
+                        }
+                        Spacer()
+                    }
+                    .padding(14)
+                }
+                .buttonStyle(.plain)
+            } else {
+                panelEmpty(icon: "bookmark", title: "无书签", message: "点击顶栏书签图标添加")
+            }
+            Spacer()
         }
-        .padding(20)
-        .frame(width: 240)
     }
 
-    private func settingSlider(title: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double, display: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private var highlightsContent: some View {
+        VStack(spacing: 0) {
+            panelEmpty(icon: "highlighter", title: "无高亮", message: "选中文字后可在这里查看")
+            Spacer()
+        }
+    }
+
+    private var searchContent: some View {
+        VStack(alignment: .leading, spacing: 17) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(OBooksPalette.secondaryText)
+                TextField("输入一个字词或页码", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.9))
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(OBooksPalette.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.white.opacity(0.13), lineWidth: 1)
+            }
+
             HStack {
-                Text(title)
+                Text("最近搜索")
                 Spacer()
-                Text(display).foregroundStyle(.secondary)
+                Button("清除") { searchQuery = "" }
+                    .buttonStyle(.plain)
             }
-            Slider(value: value, in: range, step: step)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(OBooksPalette.secondaryText)
+
+            if searchQuery.isEmpty {
+                Text("输入关键词开始搜索")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OBooksPalette.tertiaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("搜索功能将在下一版连接到章节索引")
+                    .font(.system(size: 12))
+                    .foregroundStyle(OBooksPalette.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
         }
+        .padding(14)
+    }
+
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 0) {
+                sizeButton(title: "小", value: 16)
+                Rectangle().fill(Color.white.opacity(0.22)).frame(width: 1, height: 16)
+                sizeButton(title: "大", value: 20)
+            }
+            .frame(height: 27)
+            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(ReadingTheme.allCases) { item in
+                    themeButton(item)
+                }
+            }
+
+            Button {
+                fontSize = 18
+                lineHeight = 1.7
+                margin = 56
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("自定义")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.82))
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+    }
+
+    private func sizeButton(title: String, value: Double) -> some View {
+        Button {
+            fontSize = value
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(abs(fontSize - value) < 0.1 ? .white : OBooksPalette.secondaryText)
+                .frame(maxWidth: .infinity)
+                .frame(height: 27)
+                .background(abs(fontSize - value) < 0.1 ? Color.white.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func themeButton(_ item: ReadingTheme) -> some View {
+        Button {
+            theme = item
+        } label: {
+            VStack(spacing: 3) {
+                Text("大")
+                    .font(.system(size: 20, weight: .semibold))
+                Text(item.label)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundStyle(themeForeground(item))
+            .frame(maxWidth: .infinity)
+            .frame(height: 64)
+            .background(themeBackground(item), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(theme == item ? Color.white.opacity(0.92) : Color.white.opacity(0.09), lineWidth: theme == item ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var readerFooter: some View {
+        HStack(spacing: 14) {
+            Button {
+                controller.send(.toggleSpeech)
+            } label: {
+                Image(systemName: isSpeaking ? "pause.fill" : "speaker.wave.2")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isSpeaking ? OBooksPalette.accent : .white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help(isSpeaking ? "停止朗读" : "朗读当前章节")
+
+            Button {
+                controller.send(.previousPage)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("上一页")
+
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .tint(OBooksPalette.accent)
+                .frame(width: 190)
+
+            Text(progressLabel)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 34, alignment: .leading)
+
+            Text(chapterLabel)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
+
+            Button {
+                controller.send(.nextPage)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("下一页")
+        }
+        .padding(.horizontal, 17)
+        .frame(height: 42)
+        .background(Color.black.opacity(0.84), in: Capsule())
+        .overlay {
+            Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)
+        }
+        .padding(.bottom, 10)
+    }
+
+    private var progressLabel: String {
+        String(format: "%d%%", Int(progress * 100))
+    }
+
+    private var chapterLabel: String {
+        String(format: "第 %d 章", sectionIndex + 1)
+    }
+
+    private var currentChapterTitle: String {
+        guard book.spine.indices.contains(sectionIndex) else { return "当前位置" }
+        return book.spine[sectionIndex].title
     }
 
     private var initialSectionIndex: Int {
@@ -219,10 +465,15 @@ struct ReaderView: View {
         return min(book.spine.count - 1, Int(book.progressFraction * Double(book.spine.count)))
     }
 
+    private func togglePanel(_ panel: ReaderPanel) {
+        activePanel = activePanel == panel ? nil : panel
+    }
+
     private func moveSection(_ direction: Int) {
         let next = sectionIndex + (direction > 0 ? 1 : -1)
         guard book.spine.indices.contains(next) else { return }
         sectionIndex = next
+        progress = direction > 0 ? 0 : 1
     }
 
     private func sectionIndex(for href: String) -> Int? {
@@ -243,5 +494,76 @@ struct ReaderView: View {
             result.append(contentsOf: flatten(item.children, depth: depth + 1))
         }
         return result
+    }
+
+    private func panelEmpty(icon: String, title: String, message: String) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(OBooksPalette.secondaryText)
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.75))
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(OBooksPalette.secondaryText)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 26)
+    }
+
+    private func themeBackground(_ item: ReadingTheme) -> Color {
+        switch item {
+        case .original: return Color(red: 0.05, green: 0.05, blue: 0.05)
+        case .quiet: return Color(red: 0.24, green: 0.24, blue: 0.24)
+        case .paper: return Color.white
+        case .bold: return Color.black
+        case .calm: return Color(red: 0.25, green: 0.22, blue: 0.18)
+        case .focus: return Color(red: 0.09, green: 0.09, blue: 0.07)
+        }
+    }
+
+    private func themeForeground(_ item: ReadingTheme) -> Color {
+        switch item {
+        case .paper: return Color.black.opacity(0.85)
+        case .quiet, .calm: return Color.white.opacity(0.82)
+        default: return Color.white.opacity(0.88)
+        }
+    }
+}
+
+private struct ReaderPanelSurface<Content: View>: View {
+    let title: String
+    let width: CGFloat
+    let content: Content
+
+    init(title: String, width: CGFloat, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.width = width
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.68))
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+            Rectangle()
+                .fill(Color.white.opacity(0.13))
+                .frame(height: 1)
+            content
+        }
+        .frame(width: width)
+        .frame(minHeight: 112, maxHeight: 760)
+        .background(Color(red: 0.12, green: 0.12, blue: 0.12).opacity(0.97), in: RoundedRectangle(cornerRadius: 11))
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
+        .padding(.horizontal, 26)
     }
 }

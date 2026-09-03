@@ -15,17 +15,23 @@ enum ReadingFlow: String, CaseIterable, Identifiable {
 }
 
 enum ReadingTheme: String, CaseIterable, Identifiable {
+    case original
+    case quiet
     case paper
-    case ivory
-    case dark
+    case bold
+    case calm
+    case focus
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .paper: return "白色"
-        case .ivory: return "护眼"
-        case .dark: return "深色"
+        case .original: return "原始"
+        case .quiet: return "安静"
+        case .paper: return "纸张"
+        case .bold: return "粗体"
+        case .calm: return "平静"
+        case .focus: return "专注"
         }
     }
 }

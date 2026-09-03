@@ -9,6 +9,7 @@ struct OBooksApp: App {
             LibraryView()
                 .environmentObject(appModel)
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("导入 EPUB") {

@@ -87,8 +87,12 @@ enum ReaderBridge {
         overflow: visible;
     }
     html[data-flow="scrolled"] { overflow-x: hidden; overflow-y: auto; }
-    html[data-theme="ivory"] { --obooks-background: #f4efdf; --obooks-foreground: #3d372f; }
-    html[data-theme="dark"] { --obooks-background: #1c1c1e; --obooks-foreground: #e7e7e9; }
+    html[data-theme="original"] { --obooks-background: #fbfbfa; --obooks-foreground: #202124; }
+    html[data-theme="quiet"] { --obooks-background: #efede8; --obooks-foreground: #46413a; }
+    html[data-theme="paper"] { --obooks-background: #ffffff; --obooks-foreground: #202124; }
+    html[data-theme="bold"] { --obooks-background: #1c1c1e; --obooks-foreground: #f2f2f4; }
+    html[data-theme="calm"] { --obooks-background: #e8dfcf; --obooks-foreground: #3d372f; }
+    html[data-theme="focus"] { --obooks-background: #090a0b; --obooks-foreground: #ededeb; --obooks-accent: #8eb7e8; }
     a { color: var(--obooks-accent); }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; }
     .obooks-speech-highlight { background: rgba(255, 204, 64, 0.55) !important; color: inherit !important; border-radius: 3px; }
