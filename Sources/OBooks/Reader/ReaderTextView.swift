@@ -36,9 +36,11 @@ final class ReaderTextView: NSTextView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        if let scrollView = enclosingScrollView as? ReaderScrollView,
-           scrollView.handleScrollWheel(with: event) {
-            return
+        if let scrollView = enclosingScrollView as? ReaderScrollView {
+            scrollView.notifyUserScroll()
+            if scrollView.handleScrollWheel(with: event) {
+                return
+            }
         }
         super.scrollWheel(with: event)
     }

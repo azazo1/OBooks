@@ -3,6 +3,7 @@ import QuartzCore
 
 @MainActor
 final class ReaderScrollView: NSScrollView {
+    var onUserScroll: (() -> Void)?
     private var scrollTargetY: CGFloat?
     private var refreshLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
@@ -16,8 +17,13 @@ final class ReaderScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        onUserScroll?()
         guard !handleScrollWheel(with: event) else { return }
         super.scrollWheel(with: event)
+    }
+
+    func notifyUserScroll() {
+        onUserScroll?()
     }
 
     @discardableResult

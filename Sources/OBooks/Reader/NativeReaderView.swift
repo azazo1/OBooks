@@ -156,7 +156,10 @@ struct NativeReaderView: NSViewRepresentable {
         private var onPositionConsumed: () -> Void = {}
         private var pendingProgress: Double?
         private var pendingReadingPosition: ReadingPosition?
+        private var positionBeingRestored: ReadingPosition?
         private var progressCallbackScheduled = false
+        private var restorationTaskScheduled = false
+        private var isRestoringPosition = false
         private var isTornDown = false
         var lastCommandID: UUID?
 
@@ -173,6 +176,9 @@ struct NativeReaderView: NSViewRepresentable {
             self.scrollView = scrollView
             self.textView = textView
             isTornDown = false
+            (scrollView as? ReaderScrollView)?.onUserScroll = { [weak self] in
+                self?.handleUserInteraction()
+            }
             textView.onHighlight = { [weak self] text, range in
                 self?.onAnnotation(text, "highlight", range)
             }
@@ -237,6 +243,9 @@ struct NativeReaderView: NSViewRepresentable {
             if annotationsChanged {
                 applyAnnotations()
             }
+            if anchorChanged {
+                handleUserInteraction()
+            }
             if anchorChanged, currentSectionIndex == sectionIndex, let pendingAnchor, let location = anchors[pendingAnchor] {
                 scrollToCharacter(location, animated: true)
                 consumePendingAnchor()
@@ -245,7 +254,10 @@ struct NativeReaderView: NSViewRepresentable {
                currentSectionIndex == sectionIndex,
                let pendingPosition,
                isPositionForCurrentSection(pendingPosition) {
+                positionBeingRestored = pendingPosition
+                isRestoringPosition = true
                 scrollToCharacter(pendingPosition.characterOffset, animated: false)
+                schedulePositionRestoration()
                 consumePendingPosition()
             }
         }
@@ -254,6 +266,12 @@ struct NativeReaderView: NSViewRepresentable {
             guard currentSectionIndex != requestedSectionIndex || loadedSettings != settings else { return }
             guard let book, let textView, let scrollView else { return }
             let previousSectionIndex = currentSectionIndex
+            if let pendingPosition,
+               book.spine.indices.contains(requestedSectionIndex),
+               spineIdentity(book.spine[requestedSectionIndex]) == pendingPosition.spineID {
+                positionBeingRestored = pendingPosition
+                isRestoringPosition = true
+            }
             stopSpeech()
             let appearance = NativeReaderAppearance(theme: settings.theme)
             do {
@@ -288,6 +306,13 @@ struct NativeReaderView: NSViewRepresentable {
                     consumePendingAnchor()
                 } else if pendingAnchor != nil {
                     consumePendingAnchor()
+                } else if let positionBeingRestored,
+                          isPositionForCurrentSection(positionBeingRestored) {
+                    scrollToCharacter(positionBeingRestored.characterOffset, animated: false)
+                    schedulePositionRestoration()
+                    if pendingPosition != nil {
+                        consumePendingPosition()
+                    }
                 } else if let pendingPosition {
                     if isPositionForCurrentSection(pendingPosition) {
                         scrollToCharacter(pendingPosition.characterOffset, animated: false)
@@ -309,6 +334,7 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         func execute(_ action: ReaderAction) {
+            handleUserInteraction()
             switch action {
             case .nextPage:
                 scrollPage(direction: 1)
@@ -334,6 +360,7 @@ struct NativeReaderView: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(scrollObserver)
             }
             scrollObserver = nil
+            (scrollView as? ReaderScrollView)?.onUserScroll = nil
             onProgress = { _, _ in }
             onBoundary = { _ in }
             onSpeakingChanged = { _ in }
@@ -354,6 +381,24 @@ struct NativeReaderView: NSViewRepresentable {
             textView?.onNote = nil
             textView?.onSpeak = nil
             textView?.onLink = nil
+        }
+
+        private func schedulePositionRestoration() {
+            guard !restorationTaskScheduled else { return }
+            restorationTaskScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.restorationTaskScheduled = false
+                guard self.isRestoringPosition,
+                      let position = self.positionBeingRestored,
+                      self.isPositionForCurrentSection(position) else { return }
+                self.scrollToCharacter(position.characterOffset, animated: false)
+            }
+        }
+
+        private func handleUserInteraction() {
+            isRestoringPosition = false
+            positionBeingRestored = nil
         }
 
         private func consumePendingAnchor() {
@@ -399,23 +444,22 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func scrollToCharacter(_ location: Int, animated: Bool) {
-            guard let textView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
+            guard let textView, let scrollView else { return }
             let length = (textView.string as NSString).length
-            let clampedLocation = min(max(location, 0), length)
-            let glyphIndex = clampedLocation < length ? layoutManager.glyphIndexForCharacter(at: clampedLocation) : layoutManager.numberOfGlyphs
-            let rect: NSRect
-            if glyphIndex < layoutManager.numberOfGlyphs {
-                rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
-            } else {
-                rect = layoutManager.usedRect(for: textContainer)
-            }
-            let y = max(0, rect.minY + textView.textContainerOrigin.y - textView.textContainerInset.height)
-            if animated {
-                (scrollView as? ReaderScrollView)?.scroll(to: y, animated: true)
-            } else if let scrollView {
-                (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
-                scrollView.contentView.scroll(to: NSPoint(x: 0, y: y))
+            guard length > 0 else { return }
+            let clampedLocation = min(max(location, 0), length - 1)
+            let range = NSRange(location: clampedLocation, length: 1)
+            let scroll = {
+                textView.scrollRangeToVisible(range)
                 scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            if animated {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.18
+                    scroll()
+                }
+            } else {
+                scroll()
             }
         }
 
@@ -597,7 +641,8 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func reportProgress() {
-            guard let scrollView, let book, book.spine.indices.contains(currentSectionIndex) else { return }
+            guard !isRestoringPosition,
+                  let scrollView, let book, book.spine.indices.contains(currentSectionIndex) else { return }
             let maximum = maximumScrollOffset()
             let fraction = maximum > 0 ? scrollView.contentView.bounds.origin.y / maximum : 0
             let position = ReadingPosition(

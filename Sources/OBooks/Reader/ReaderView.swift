@@ -119,6 +119,12 @@ struct ReaderView: View {
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var isEditingNote = false
 
+    init(book: BookSummary) {
+        self.book = book
+        _sectionIndex = State(initialValue: Self.initialSectionIndex(for: book))
+        _pendingPosition = State(initialValue: Self.initialReadingPosition(for: book))
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             chromeBackground.ignoresSafeArea()
@@ -199,8 +205,6 @@ struct ReaderView: View {
         .ignoresSafeArea(.container, edges: .top)
         .background(chromeBackground)
         .onAppear {
-            sectionIndex = initialSectionIndex
-            pendingPosition = initialReadingPosition
             progressState.configure { fraction, position in
                 appModel.updateProgress(bookID: book.id, fraction: fraction, position: position)
             }
@@ -633,9 +637,9 @@ struct ReaderView: View {
         return book.spine[sectionIndex].title
     }
 
-    private var initialSectionIndex: Int {
+    private static func initialSectionIndex(for book: BookSummary) -> Int {
         if let position = book.readingPosition,
-            let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID })
+            let index = book.spine.firstIndex(where: { Self.spineIdentity($0) == position.spineID })
         {
             return index
         }
@@ -643,15 +647,19 @@ struct ReaderView: View {
         return min(book.spine.count - 1, Int(book.progressFraction * Double(book.spine.count)))
     }
 
-    private var initialReadingPosition: ReadingPosition? {
+    private static func initialReadingPosition(for book: BookSummary) -> ReadingPosition? {
         guard let position = book.readingPosition,
-            book.spine.contains(where: { spineIdentity($0) == position.spineID })
+            book.spine.contains(where: { Self.spineIdentity($0) == position.spineID })
         else { return nil }
         return position
     }
 
-    private func spineIdentity(_ item: EPUBSpineItem) -> String {
+    private static func spineIdentity(_ item: EPUBSpineItem) -> String {
         item.id.isEmpty ? item.href : item.id
+    }
+
+    private func spineIdentity(_ item: EPUBSpineItem) -> String {
+        Self.spineIdentity(item)
     }
 
     private func keepChromeVisible() {
