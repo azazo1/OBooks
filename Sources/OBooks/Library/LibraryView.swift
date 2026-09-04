@@ -8,7 +8,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
     case wishlist
     case finished
     case books
-    case samples
 
     var id: String { rawValue }
 
@@ -19,7 +18,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
         case .wishlist: return "欲读清单"
         case .finished: return "已读完"
         case .books: return "图书"
-        case .samples: return "我的试读版"
         }
     }
 
@@ -30,7 +28,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
         case .wishlist: return "arrow.right.circle"
         case .finished: return "checkmark.circle"
         case .books: return "book"
-        case .samples: return "rectangle.stack"
         }
     }
 }
@@ -52,6 +49,7 @@ struct LibraryView: View {
     @State private var destination: LibraryDestination = .home
     @State private var query = ""
     @State private var isDropTargeted = false
+    @State private var bookPendingDeletion: BookSummary?
 
     private var visibleBooks: [BookSummary] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -59,7 +57,7 @@ struct LibraryView: View {
             query.isEmpty || book.title.localizedCaseInsensitiveContains(query) || book.authorLabel.localizedCaseInsensitiveContains(query)
         }
         switch destination {
-        case .home, .all, .books, .samples:
+        case .home, .all, .books:
             return matching
         case .wishlist:
             return matching.filter { $0.progressFraction == 0 }
@@ -75,9 +73,22 @@ struct LibraryView: View {
                 .fill(Color.white.opacity(0.08))
                 .frame(width: 1)
             if destination == .home {
-                LibraryHomeView(books: visibleBooks, store: appModel.libraryStore, onOpen: appModel.open, onImport: appModel.importEPUB)
+                LibraryHomeView(
+                    books: visibleBooks,
+                    store: appModel.libraryStore,
+                    onOpen: appModel.open,
+                    onImport: appModel.importEPUB,
+                    onDelete: requestDelete
+                )
             } else {
-                LibraryCollectionView(destination: destination, books: visibleBooks, store: appModel.libraryStore, onOpen: appModel.open, onImport: appModel.importEPUB)
+                LibraryCollectionView(
+                    destination: destination,
+                    books: visibleBooks,
+                    store: appModel.libraryStore,
+                    onOpen: appModel.open,
+                    onImport: appModel.importEPUB,
+                    onDelete: requestDelete
+                )
             }
         }
         .frame(minWidth: 1000, minHeight: 680)
@@ -94,16 +105,44 @@ struct LibraryView: View {
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers)
         }
-        .alert("导入失败", isPresented: Binding(
-            get: { appModel.alert != nil },
-            set: { isPresented in
-                if !isPresented { appModel.alert = nil }
-            }
-        )) {
+        .alert(
+            appModel.alert?.title ?? "提示",
+            isPresented: Binding(
+                get: { appModel.alert != nil },
+                set: { isPresented in
+                    if !isPresented { appModel.alert = nil }
+                }
+            )
+        ) {
             Button("确定", role: .cancel) {}
         } message: {
             Text(appModel.alert?.message ?? "")
         }
+        .confirmationDialog(
+            "删除图书",
+            isPresented: Binding(
+                get: { bookPendingDeletion != nil },
+                set: { isPresented in
+                    if !isPresented { bookPendingDeletion = nil }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                guard let book = bookPendingDeletion else { return }
+                bookPendingDeletion = nil
+                appModel.delete(book)
+            }
+            Button("取消", role: .cancel) {
+                bookPendingDeletion = nil
+            }
+        } message: {
+            Text("确定删除 \(bookPendingDeletion?.title ?? "这本书") 及其本地文件")
+        }
+    }
+
+    private func requestDelete(_ book: BookSummary) {
+        bookPendingDeletion = book
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {

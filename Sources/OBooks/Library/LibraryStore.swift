@@ -2,6 +2,16 @@ import AppKit
 import Foundation
 import OSLog
 
+enum LibraryStoreError: LocalizedError {
+    case invalidBookFolder
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBookFolder: return "图书文件夹无效"
+        }
+    }
+}
+
 final class LibraryStore {
     private struct Snapshot: Codable {
         let schemaVersion: Int
@@ -63,6 +73,18 @@ final class LibraryStore {
 
     func bookFolderURL(for id: UUID) -> URL {
         Self.booksDirectoryURL.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    func deleteBookData(for book: BookSummary) throws {
+        let folderURL = book.folderURL.standardizedFileURL
+        let booksURL = Self.booksDirectoryURL.standardizedFileURL
+        guard folderURL.deletingLastPathComponent() == booksURL else {
+            throw LibraryStoreError.invalidBookFolder
+        }
+        guard fileManager.fileExists(atPath: folderURL.path) else {
+            return
+        }
+        try fileManager.removeItem(at: folderURL)
     }
 
     func coverImage(for book: BookSummary) -> NSImage? {

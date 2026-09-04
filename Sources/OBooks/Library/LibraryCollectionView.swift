@@ -6,6 +6,7 @@ struct LibraryCollectionView: View {
     let store: LibraryStore
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
+    let onDelete: (BookSummary) -> Void
 
     var body: some View {
         ScrollView {
@@ -33,7 +34,13 @@ struct LibraryCollectionView: View {
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 28)], alignment: .leading, spacing: 30) {
                         ForEach(books) { book in
-                            CollectionBookCard(book: book, store: store) { onOpen(book) }
+                            CollectionBookCard(
+                                book: book,
+                                store: store,
+                                onDelete: { onDelete(book) }
+                            ) {
+                                onOpen(book)
+                            }
                         }
                     }
                 }
@@ -67,30 +74,37 @@ struct LibraryCollectionView: View {
 private struct CollectionBookCard: View {
     let book: BookSummary
     let store: LibraryStore
+    let onDelete: () -> Void
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                BookCoverImage(book: book, store: store)
-                    .aspectRatio(0.68, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-                    .shadow(color: .black.opacity(0.28), radius: 7, y: 4)
-                Text(book.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(book.authorLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(OBooksPalette.secondaryText)
-                    .lineLimit(1)
-                ProgressView(value: book.progressFraction)
-                    .progressViewStyle(.linear)
-                    .tint(OBooksPalette.accent)
+        ZStack(alignment: .bottomTrailing) {
+            Button(action: action) {
+                VStack(alignment: .leading, spacing: 10) {
+                    BookCoverImage(book: book, store: store)
+                        .aspectRatio(0.68, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .shadow(color: .black.opacity(0.28), radius: 7, y: 4)
+                    Text(book.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(book.authorLabel)
+                        .font(.system(size: 11))
+                        .foregroundStyle(OBooksPalette.secondaryText)
+                        .lineLimit(1)
+                    ProgressView(value: book.progressFraction)
+                        .progressViewStyle(.linear)
+                        .tint(OBooksPalette.accent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .buttonStyle(.plain)
+
+            BookActionMenu(onDelete: onDelete)
+                .padding(6)
         }
-        .buttonStyle(.plain)
+        .bookContextMenu(onDelete: onDelete)
     }
 }

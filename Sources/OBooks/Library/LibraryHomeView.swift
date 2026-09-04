@@ -6,6 +6,7 @@ struct LibraryHomeView: View {
     let store: LibraryStore
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
+    let onDelete: (BookSummary) -> Void
 
     private var continueBooks: [BookSummary] {
         books.sorted { lhs, rhs in
@@ -29,7 +30,7 @@ struct LibraryHomeView: View {
                         ScrollView(.horizontal) {
                             LazyHStack(spacing: 18) {
                                 ForEach(continueBooks) { book in
-                                    ContinueBookCard(book: book, store: store) { onOpen(book) }
+                                    ContinueBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
                                 }
                             }
                             .padding(.vertical, 4)
@@ -45,7 +46,7 @@ struct LibraryHomeView: View {
                         ScrollView(.horizontal) {
                             LazyHStack(spacing: 20) {
                                 ForEach(books.prefix(6)) { book in
-                                    PreviousBookCard(book: book, store: store) { onOpen(book) }
+                                    PreviousBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
                                 }
                             }
                             .padding(.vertical, 4)
@@ -63,7 +64,7 @@ struct LibraryHomeView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 22)], alignment: .leading, spacing: 26) {
                             ForEach(completedBooks) { book in
-                                CompactBookCard(book: book, store: store) { onOpen(book) }
+                                CompactBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
                             }
                         }
                     }
@@ -166,6 +167,7 @@ struct LibraryHomeView: View {
 private struct ContinueBookCard: View {
     let book: BookSummary
     let store: LibraryStore
+    let onDelete: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -199,12 +201,18 @@ private struct ContinueBookCard: View {
             .background(OBooksPalette.card, in: RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .bottomTrailing) {
+            BookActionMenu(onDelete: onDelete)
+                .padding(6)
+        }
+        .bookContextMenu(onDelete: onDelete)
     }
 }
 
 private struct PreviousBookCard: View {
     let book: BookSummary
     let store: LibraryStore
+    let onDelete: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -224,12 +232,18 @@ private struct PreviousBookCard: View {
             .frame(width: 116, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .bottomTrailing) {
+            BookActionMenu(onDelete: onDelete)
+                .padding(6)
+        }
+        .bookContextMenu(onDelete: onDelete)
     }
 }
 
 private struct CompactBookCard: View {
     let book: BookSummary
     let store: LibraryStore
+    let onDelete: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -245,6 +259,11 @@ private struct CompactBookCard: View {
             .frame(width: 116, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .bottomTrailing) {
+            BookActionMenu(onDelete: onDelete)
+                .padding(6)
+        }
+        .bookContextMenu(onDelete: onDelete)
     }
 }
 

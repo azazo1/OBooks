@@ -7,6 +7,7 @@ import SwiftUI
 
 struct AppAlert: Identifiable {
     let id = UUID()
+    let title: String
     let message: String
 }
 
@@ -58,8 +59,34 @@ final class AppModel: ObservableObject {
             logger.info("导入完成: title=\(book.title, privacy: .public)")
         } catch {
             logger.error("导入失败: file=\(url.lastPathComponent, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
-            alert = AppAlert(message: error.localizedDescription)
+            alert = AppAlert(title: "导入失败", message: error.localizedDescription)
         }
+    }
+
+    func delete(_ book: BookSummary) {
+        guard books.contains(where: { $0.id == book.id }) else {
+            return
+        }
+
+        do {
+            try libraryStore.deleteBookData(for: book)
+        } catch {
+            logger.error("删除失败: title=\(book.title, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
+            alert = AppAlert(title: "删除失败", message: error.localizedDescription)
+            return
+        }
+
+        progressSaveTask?.cancel()
+        closeReader(for: book.id)
+        books.removeAll { $0.id == book.id }
+        if selectedBookID == book.id {
+            selectedBookID = nil
+        }
+        if openBook?.id == book.id {
+            openBook = nil
+        }
+        libraryStore.save(books)
+        logger.info("删除完成: title=\(book.title, privacy: .public)")
     }
 
     func openSelectedBook() {
@@ -123,6 +150,15 @@ final class AppModel: ObservableObject {
         window.makeKeyAndOrderFront(nil)
         AppWindowConfiguration.centerOnScreen(window)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func closeReader(for bookID: UUID) {
+        if let window = readerWindows[bookID] {
+            window.delegate = nil
+            window.close()
+        }
+        readerWindows.removeValue(forKey: bookID)
+        readerDelegates.removeValue(forKey: bookID)
     }
 
     func updateProgress(bookID: UUID, fraction: Double) {
