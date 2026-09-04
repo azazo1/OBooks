@@ -7,6 +7,7 @@ struct NativeReaderView: NSViewRepresentable {
     @Binding var sectionIndex: Int
     @Binding var pendingAnchor: String?
     @Binding var pendingPosition: ReadingPosition?
+    @Binding var pendingPositionAnimated: Bool
     let theme: ReadingTheme
     let fontSize: Double
     let lineHeight: Double
@@ -69,6 +70,7 @@ struct NativeReaderView: NSViewRepresentable {
             sectionIndex: sectionIndex,
             pendingAnchor: pendingAnchor,
             pendingPosition: pendingPosition,
+            pendingPositionAnimated: pendingPositionAnimated,
             theme: theme,
             fontSize: fontSize,
             lineHeight: lineHeight,
@@ -94,6 +96,7 @@ struct NativeReaderView: NSViewRepresentable {
             sectionIndex: sectionIndex,
             pendingAnchor: pendingAnchor,
             pendingPosition: pendingPosition,
+            pendingPositionAnimated: pendingPositionAnimated,
             theme: theme,
             fontSize: fontSize,
             lineHeight: lineHeight,
@@ -138,6 +141,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var requestedSectionIndex = 0
         private var pendingAnchor: String?
         private var pendingPosition: ReadingPosition?
+        private var pendingPositionAnimated = false
         private var currentSectionIndex = -1
         private var anchors: [String: Int] = [:]
         private var settings = Settings(theme: .focus, fontSize: 18, lineHeight: 1.7, margin: 56)
@@ -209,6 +213,7 @@ struct NativeReaderView: NSViewRepresentable {
             sectionIndex: Int,
             pendingAnchor: String?,
             pendingPosition: ReadingPosition?,
+            pendingPositionAnimated: Bool,
             theme: ReadingTheme,
             fontSize: Double,
             lineHeight: Double,
@@ -229,6 +234,8 @@ struct NativeReaderView: NSViewRepresentable {
             self.pendingAnchor = pendingAnchor
             let positionChanged = self.pendingPosition != pendingPosition
             self.pendingPosition = pendingPosition
+            let positionAnimated = pendingPositionAnimated
+            self.pendingPositionAnimated = pendingPositionAnimated
             settings = Settings(theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
             let annotationsChanged = self.annotations != annotations
             self.annotations = annotations
@@ -254,6 +261,12 @@ struct NativeReaderView: NSViewRepresentable {
                currentSectionIndex == sectionIndex,
                let pendingPosition,
                isPositionForCurrentSection(pendingPosition) {
+                if positionAnimated {
+                    handleUserInteraction()
+                    scrollToCharacter(pendingPosition.characterOffset, animated: true)
+                    consumePendingPosition()
+                    return
+                }
                 positionBeingRestored = pendingPosition
                 isRestoringPosition = true
                 scrollToCharacter(pendingPosition.characterOffset, animated: false)
@@ -308,8 +321,13 @@ struct NativeReaderView: NSViewRepresentable {
                     consumePendingAnchor()
                 } else if let positionBeingRestored,
                           isPositionForCurrentSection(positionBeingRestored) {
-                    scrollToCharacter(positionBeingRestored.characterOffset, animated: false)
-                    schedulePositionRestoration()
+                    if pendingPositionAnimated {
+                        handleUserInteraction()
+                        scrollToCharacter(positionBeingRestored.characterOffset, animated: true)
+                    } else {
+                        scrollToCharacter(positionBeingRestored.characterOffset, animated: false)
+                        schedulePositionRestoration()
+                    }
                     if pendingPosition != nil {
                         consumePendingPosition()
                     }

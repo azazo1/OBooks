@@ -101,6 +101,9 @@ struct ReaderView: View {
     @State private var sectionIndex = 0
     @State private var pendingAnchor: String?
     @State private var pendingPosition: ReadingPosition?
+    @State private var pendingPositionAnimated = false
+    @State private var currentPosition: ReadingPosition?
+    @State private var jumpBackPosition: ReadingPosition?
     @State private var progressState = ReaderProgressState()
     @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
@@ -121,8 +124,13 @@ struct ReaderView: View {
 
     init(book: BookSummary) {
         self.book = book
-        _sectionIndex = State(initialValue: Self.initialSectionIndex(for: book))
+        let initialSectionIndex = Self.initialSectionIndex(for: book)
+        _sectionIndex = State(initialValue: initialSectionIndex)
         _pendingPosition = State(initialValue: Self.initialReadingPosition(for: book))
+        _currentPosition = State(
+            initialValue: Self.initialReadingPosition(for: book)
+                ?? Self.defaultReadingPosition(for: book, sectionIndex: initialSectionIndex)
+        )
     }
 
     var body: some View {
@@ -134,6 +142,7 @@ struct ReaderView: View {
                 sectionIndex: $sectionIndex,
                 pendingAnchor: $pendingAnchor,
                 pendingPosition: $pendingPosition,
+                pendingPositionAnimated: $pendingPositionAnimated,
                 theme: theme,
                 fontSize: fontSize,
                 lineHeight: lineHeight,
@@ -141,6 +150,7 @@ struct ReaderView: View {
                 annotations: annotations,
                 controller: controller,
                 onProgress: { value, position in
+                    currentPosition = position
                     let count = Double(max(book.spine.count, 1))
                     let currentIndex =
                         book.spine.firstIndex { spineIdentity($0) == position.spineID }
@@ -168,14 +178,17 @@ struct ReaderView: View {
                     keepChromeVisible()
                 },
                 onNavigate: { index, anchor in
+                    registerJump()
                     navigateTo(sectionIndex: index, anchor: anchor)
                 },
                 onAnchorConsumed: {
                     pendingAnchor = nil
                     pendingPosition = nil
+                    pendingPositionAnimated = false
                 },
                 onPositionConsumed: {
                     pendingPosition = nil
+                    pendingPositionAnimated = false
                 }
             )
 
@@ -187,6 +200,11 @@ struct ReaderView: View {
         }
         .overlay(alignment: .bottom) {
             readerFooter
+        }
+        .overlay(alignment: .bottomLeading) {
+            if jumpBackPosition != nil {
+                jumpBackButton
+            }
         }
         .overlay {
             ReaderMouseTracker(chromeVisible: chromeVisible, edgeThreshold: 88) { isNear in
@@ -562,10 +580,29 @@ struct ReaderView: View {
             colorScheme: colorScheme,
             chromeVisible: chromeVisible,
             controller: controller,
+            onSeekStarted: registerJump,
             onSeek: { x, width, animated in
                 seekProgress(at: x, width: width, animated: animated)
             }
         )
+    }
+
+    private var jumpBackButton: some View {
+        Button {
+            undoJump()
+        } label: {
+            Image(systemName: "arrow.uturn.backward.circle")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.72))
+        }
+        .buttonStyle(OBooksIconButtonStyle(size: 30, cornerRadius: 15))
+        .help("返回跳转前位置")
+        .padding(.leading, 20)
+        .padding(.bottom, 14)
+        .opacity(chromeVisible ? 1 : 0)
+        .allowsHitTesting(chromeVisible)
+        .animation(.easeOut(duration: 0.18), value: chromeVisible)
+        .transition(.opacity)
     }
 
     private func seekProgress(at x: CGFloat, width: CGFloat, animated: Bool) {
@@ -654,6 +691,17 @@ struct ReaderView: View {
         return position
     }
 
+    private static func defaultReadingPosition(
+        for book: BookSummary,
+        sectionIndex: Int
+    ) -> ReadingPosition? {
+        guard book.spine.indices.contains(sectionIndex) else { return nil }
+        return ReadingPosition(
+            spineID: spineIdentity(book.spine[sectionIndex]),
+            characterOffset: 0
+        )
+    }
+
     private static func spineIdentity(_ item: EPUBSpineItem) -> String {
         item.id.isEmpty ? item.href : item.id
     }
@@ -700,12 +748,14 @@ struct ReaderView: View {
     private func moveSection(_ direction: Int) {
         let next = sectionIndex + (direction > 0 ? 1 : -1)
         guard book.spine.indices.contains(next) else { return }
+        registerJump()
         sectionIndex = next
         progressState.setInitialValue(direction > 0 ? 0 : 1)
     }
 
     private func navigateTo(href: String) {
         guard let index = sectionIndex(for: href) else { return }
+        registerJump()
         navigateTo(
             sectionIndex: index,
             anchor: href.split(separator: "#", maxSplits: 1).dropFirst().first.map(String.init)
@@ -715,6 +765,27 @@ struct ReaderView: View {
     private func navigateTo(sectionIndex index: Int, anchor: String?) {
         sectionIndex = index
         pendingAnchor = anchor
+        activePanel = nil
+        keepChromeVisible()
+    }
+
+    private func registerJump() {
+        guard let currentPosition else { return }
+        jumpBackPosition = currentPosition
+        keepChromeVisible()
+    }
+
+    private func undoJump() {
+        guard let position = jumpBackPosition else { return }
+        jumpBackPosition = nil
+        guard let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID }) else {
+            return
+        }
+        sectionIndex = index
+        pendingAnchor = nil
+        pendingPosition = position
+        pendingPositionAnimated = true
+        currentPosition = position
         activePanel = nil
         keepChromeVisible()
     }
@@ -784,7 +855,9 @@ private struct ReaderFooter: View {
     let colorScheme: ColorScheme
     let chromeVisible: Bool
     let controller: ReaderController
+    let onSeekStarted: () -> Void
     let onSeek: (CGFloat, CGFloat, Bool) -> Void
+    @State private var isSeeking = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -863,12 +936,20 @@ private struct ReaderFooter: View {
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .local)
                     .onChanged { value in
+                        if !isSeeking {
+                            isSeeking = true
+                            onSeekStarted()
+                        }
                         guard abs(value.location.x - value.startLocation.x) > 3 else { return }
                         seek(at: value.location.x, width: geometry.size.width, animated: false)
                     }
                     .onEnded { value in
+                        if !isSeeking {
+                            onSeekStarted()
+                        }
                         let didDrag = abs(value.location.x - value.startLocation.x) > 3
                         seek(at: value.location.x, width: geometry.size.width, animated: !didDrag)
+                        isSeeking = false
                     }
             )
             .help("跳转到章节进度")
