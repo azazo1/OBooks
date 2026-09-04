@@ -169,9 +169,6 @@ struct ReaderView: View {
                     let overall = flow.scrollScope == .book || flow.isPaging
                         ? min(1, max(0, value))
                         : min(1, Double(currentIndex) / count + value / count)
-                    if flow.scrollScope == .book || flow.isPaging {
-                        sectionIndex = currentIndex
-                    }
                     let displayValue = flow.scrollScope == .chapter && !flow.isPaging ? value : overall
                     progressState.update(displayValue, persistValue: overall, position: position)
                 },
@@ -844,7 +841,10 @@ struct ReaderView: View {
     }
 
     private func moveSection(_ direction: Int) {
-        let next = sectionIndex + (direction > 0 ? 1 : -1)
+        let currentIndex = currentPosition.flatMap { position in
+            book.spine.firstIndex { spineIdentity($0) == position.spineID }
+        } ?? sectionIndex
+        let next = currentIndex + (direction > 0 ? 1 : -1)
         guard book.spine.indices.contains(next) else { return }
         registerJump()
         sectionIndex = next
