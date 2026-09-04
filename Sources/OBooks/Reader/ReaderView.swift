@@ -109,6 +109,7 @@ struct ReaderView: View {
     @State private var fontSize = 18.0
     @State private var lineHeight = 1.7
     @State private var margin = 56.0
+    @State private var flow: ReaderFlowMode = .scrolling(scope: .chapter)
     @State private var activePanel: ReaderPanel?
     @State private var isBookmarked = false
     @State private var searchQuery = ""
@@ -144,6 +145,7 @@ struct ReaderView: View {
                 pendingPosition: $pendingPosition,
                 pendingPositionAnimated: $pendingPositionAnimated,
                 theme: theme,
+                flow: flow,
                 fontSize: fontSize,
                 lineHeight: lineHeight,
                 margin: margin,
@@ -155,8 +157,14 @@ struct ReaderView: View {
                     let currentIndex =
                         book.spine.firstIndex { spineIdentity($0) == position.spineID }
                         ?? sectionIndex
-                    let overall = min(1, Double(currentIndex) / count + value / count)
-                    progressState.update(value, persistValue: overall, position: position)
+                    let overall = flow.scrollScope == .book
+                        ? min(1, max(0, value))
+                        : min(1, Double(currentIndex) / count + value / count)
+                    if flow.scrollScope == .book || flow.isPaging {
+                        sectionIndex = currentIndex
+                    }
+                    let displayValue = flow.scrollScope == .chapter && !flow.isPaging ? value : overall
+                    progressState.update(displayValue, persistValue: overall, position: position)
                 },
                 onBoundary: moveSection,
                 onSpeakingChanged: { value in
@@ -492,6 +500,8 @@ struct ReaderView: View {
 
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 16) {
+            flowControls
+
             HStack(spacing: 0) {
                 sizeButton(title: "小", value: 16)
                 Rectangle().fill(Color.white.opacity(0.22)).frame(width: 1, height: 16)
@@ -529,6 +539,69 @@ struct ReaderView: View {
             .buttonStyle(.plain)
         }
         .padding(14)
+    }
+
+    private var flowControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                flowButton(title: "滚动", selected: flow.scrollScope != nil) {
+                    flow = .scrolling(scope: flow.scrollScope ?? .chapter)
+                }
+                flowButton(title: "翻页", selected: flow.isPaging) {
+                    flow = .paging(
+                        orientation: flow.pageOrientation ?? .horizontal,
+                        columns: flow.pageColumns
+                    )
+                }
+            }
+            if let scope = flow.scrollScope {
+                HStack(spacing: 6) {
+                    ForEach(ReaderScrollScope.allCases) { item in
+                        flowButton(title: item.label, selected: scope == item) {
+                            flow = .scrolling(scope: item)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(ReaderPageOrientation.allCases) { item in
+                        flowButton(
+                            title: item.label,
+                            selected: flow.pageOrientation == item
+                        ) {
+                            flow = .paging(orientation: item, columns: flow.pageColumns)
+                        }
+                    }
+                    ForEach(ReaderPageColumns.allCases) { item in
+                        flowButton(title: item.label, selected: flow.pageColumns == item) {
+                            flow = .paging(
+                                orientation: flow.pageOrientation ?? .horizontal,
+                                columns: item
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func flowButton(
+        title: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(selected ? .white : OBooksPalette.secondaryText)
+                .frame(maxWidth: .infinity)
+                .frame(height: 26)
+                .background(
+                    selected ? OBooksPalette.accent.opacity(0.68) : Color.white.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private func sizeButton(title: String, value: Double) -> some View {
@@ -575,7 +648,7 @@ struct ReaderView: View {
         ReaderFooter(
             progressState: progressState,
             isSpeaking: isSpeaking,
-            chapterLabel: chapterLabel,
+            flow: flow,
             chromeBackground: chromeBackground,
             colorScheme: colorScheme,
             chromeVisible: chromeVisible,
@@ -663,10 +736,6 @@ struct ReaderView: View {
 
     private var chromeBackground: Color {
         colorScheme == .dark ? .black : Color(nsColor: .windowBackgroundColor)
-    }
-
-    private var chapterLabel: String {
-        String(format: "第 %d 章", sectionIndex + 1)
     }
 
     private var currentChapterTitle: String {
@@ -850,7 +919,7 @@ struct ReaderView: View {
 private struct ReaderFooter: View {
     @ObservedObject var progressState: ReaderProgressState
     let isSpeaking: Bool
-    let chapterLabel: String
+    let flow: ReaderFlowMode
     let chromeBackground: Color
     let colorScheme: ColorScheme
     let chromeVisible: Bool
@@ -875,7 +944,7 @@ private struct ReaderFooter: View {
             Button {
                 controller.send(.previousPage)
             } label: {
-                Image(systemName: "chevron.left")
+                Image(systemName: previousPageSymbol)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(width: 24, height: 24)
@@ -890,15 +959,10 @@ private struct ReaderFooter: View {
                 .foregroundStyle(.white.opacity(0.55))
                 .frame(width: 34, alignment: .leading)
 
-            Text(chapterLabel)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(1)
-
             Button {
                 controller.send(.nextPage)
             } label: {
-                Image(systemName: "chevron.right")
+                Image(systemName: nextPageSymbol)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(width: 24, height: 24)
@@ -952,13 +1016,21 @@ private struct ReaderFooter: View {
                         isSeeking = false
                     }
             )
-            .help("跳转到章节进度")
+            .help("跳转到阅读进度")
         }
         .frame(width: 190, height: 18)
     }
 
     private var progressLabel: String {
         String(format: "%d%%", Int(progressState.value * 100))
+    }
+
+    private var previousPageSymbol: String {
+        flow.pageOrientation == .vertical ? "chevron.up" : "chevron.left"
+    }
+
+    private var nextPageSymbol: String {
+        flow.pageOrientation == .vertical ? "chevron.down" : "chevron.right"
     }
 
     private func seek(at x: CGFloat, width: CGFloat, animated: Bool) {

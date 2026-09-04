@@ -22,6 +22,73 @@ enum ReadingTheme: String, CaseIterable, Identifiable {
     }
 }
 
+enum ReaderScrollScope: String, CaseIterable, Identifiable {
+    case chapter
+    case book
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .chapter: return "章节内"
+        case .book: return "全书连续"
+        }
+    }
+}
+
+enum ReaderPageOrientation: String, CaseIterable, Identifiable {
+    case vertical
+    case horizontal
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .vertical: return "垂直"
+        case .horizontal: return "水平"
+        }
+    }
+}
+
+enum ReaderPageColumns: Int, CaseIterable, Identifiable {
+    case single = 1
+    case double = 2
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .single: return "单栏"
+        case .double: return "双栏"
+        }
+    }
+}
+
+enum ReaderFlowMode: Equatable {
+    case scrolling(scope: ReaderScrollScope)
+    case paging(orientation: ReaderPageOrientation, columns: ReaderPageColumns)
+
+    var isPaging: Bool {
+        if case .paging = self { return true }
+        return false
+    }
+
+    var scrollScope: ReaderScrollScope? {
+        if case .scrolling(let scope) = self { return scope }
+        return nil
+    }
+
+    var pageOrientation: ReaderPageOrientation? {
+        if case .paging(let orientation, _) = self { return orientation }
+        return nil
+    }
+
+    var pageColumns: ReaderPageColumns {
+        if case .paging(_, let columns) = self { return columns }
+        return .single
+    }
+}
+
 struct ReadingPosition: Codable, Hashable, Sendable {
     let spineID: String
     let characterOffset: Int

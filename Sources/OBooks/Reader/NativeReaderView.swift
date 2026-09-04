@@ -9,6 +9,7 @@ struct NativeReaderView: NSViewRepresentable {
     @Binding var pendingPosition: ReadingPosition?
     @Binding var pendingPositionAnimated: Bool
     let theme: ReadingTheme
+    let flow: ReaderFlowMode
     let fontSize: Double
     let lineHeight: Double
     let margin: Double
@@ -31,9 +32,10 @@ struct NativeReaderView: NSViewRepresentable {
         let initialSize = NSSize(width: 900, height: 680)
         let scrollView = ReaderScrollView(frame: NSRect(origin: .zero, size: initialSize))
         scrollView.wantsLayer = true
+        scrollView.layer?.masksToBounds = true
         scrollView.contentView.wantsLayer = true
         scrollView.drawsBackground = true
-        scrollView.hasVerticalScroller = false
+        scrollView.hasVerticalScroller = flow.scrollScope != nil
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
@@ -72,6 +74,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingPosition: pendingPosition,
             pendingPositionAnimated: pendingPositionAnimated,
             theme: theme,
+            flow: flow,
             fontSize: fontSize,
             lineHeight: lineHeight,
             margin: margin,
@@ -98,6 +101,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingPosition: pendingPosition,
             pendingPositionAnimated: pendingPositionAnimated,
             theme: theme,
+            flow: flow,
             fontSize: fontSize,
             lineHeight: lineHeight,
             margin: margin,
@@ -126,6 +130,7 @@ struct NativeReaderView: NSViewRepresentable {
     final class Coordinator: NSObject {
         private struct Settings: Equatable {
             let theme: ReadingTheme
+            let flow: ReaderFlowMode
             let fontSize: Double
             let lineHeight: Double
             let margin: Double
@@ -144,7 +149,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var pendingPositionAnimated = false
         private var currentSectionIndex = -1
         private var anchors: [String: Int] = [:]
-        private var settings = Settings(theme: .focus, fontSize: 18, lineHeight: 1.7, margin: 56)
+        private var settings = Settings(theme: .focus, flow: .scrolling(scope: .chapter), fontSize: 18, lineHeight: 1.7, margin: 56)
         private var loadedSettings: Settings?
         private var annotations: [ReaderAnnotation] = []
         private var renderedAnnotationRanges: [(range: NSRange, kind: String)] = []
@@ -165,6 +170,11 @@ struct NativeReaderView: NSViewRepresentable {
         private var restorationTaskScheduled = false
         private var isRestoringPosition = false
         private var isTornDown = false
+        private var loadedBookContent = false
+        private var sectionRanges: [String: NSRange] = [:]
+        private var sectionIndices: [String: Int] = [:]
+        private var sectionAnchors: [String: [String: Int]] = [:]
+        private var pendingPageSeekFraction: Double?
         var lastCommandID: UUID?
 
         deinit {
@@ -180,14 +190,20 @@ struct NativeReaderView: NSViewRepresentable {
             self.scrollView = scrollView
             self.textView = textView
             isTornDown = false
-            (scrollView as? ReaderScrollView)?.onUserScroll = { [weak self] in
-                self?.handleUserInteraction()
+            if let readerScrollView = scrollView as? ReaderScrollView {
+                readerScrollView.onUserScroll = { [weak self] in
+                    self?.handleUserInteraction()
+                }
+                readerScrollView.pageTurn = { [weak self] direction in
+                    self?.handleUserInteraction()
+                    self?.scrollPage(direction: direction)
+                }
             }
             textView.onHighlight = { [weak self] text, range in
-                self?.onAnnotation(text, "highlight", range)
+                self?.onAnnotation(text, "highlight", self?.localizedAnnotationRange(range) ?? range)
             }
             textView.onNote = { [weak self] text, range in
-                self?.onNoteRequest(text, range)
+                self?.onNoteRequest(text, self?.localizedAnnotationRange(range) ?? range)
             }
             textView.onSpeak = { [weak self] location in
                 self?.startSpeech(at: location)
@@ -215,6 +231,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingPosition: ReadingPosition?,
             pendingPositionAnimated: Bool,
             theme: ReadingTheme,
+            flow: ReaderFlowMode = .scrolling(scope: .chapter),
             fontSize: Double,
             lineHeight: Double,
             margin: Double,
@@ -236,7 +253,14 @@ struct NativeReaderView: NSViewRepresentable {
             self.pendingPosition = pendingPosition
             let positionAnimated = pendingPositionAnimated
             self.pendingPositionAnimated = pendingPositionAnimated
-            settings = Settings(theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
+            let flowChanged = settings.flow != flow
+            let preservedPosition = flowChanged ? currentReadingPosition() : nil
+            settings = Settings(theme: theme, flow: flow, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
+            if let scrollView {
+                scrollView.hasVerticalScroller = flow.scrollScope != nil
+                scrollView.hasHorizontalScroller = false
+                (scrollView as? ReaderScrollView)?.configure(flow: flow)
+            }
             let annotationsChanged = self.annotations != annotations
             self.annotations = annotations
             self.onProgress = onProgress
@@ -253,14 +277,17 @@ struct NativeReaderView: NSViewRepresentable {
             if anchorChanged {
                 handleUserInteraction()
             }
-            if anchorChanged, currentSectionIndex == sectionIndex, let pendingAnchor, let location = anchors[pendingAnchor] {
-                scrollToCharacter(location, animated: true)
+            if anchorChanged,
+               let pendingAnchor,
+               let location = anchorLocation(pendingAnchor),
+               (currentSectionIndex == sectionIndex || loadedBookContent) {
+                scrollToCharacter(location, animated: true, locationIsGlobal: loadedBookContent)
                 consumePendingAnchor()
             }
             if positionChanged,
-               currentSectionIndex == sectionIndex,
                let pendingPosition,
-               isPositionForCurrentSection(pendingPosition) {
+               isPositionLoaded(pendingPosition),
+               (currentSectionIndex == sectionIndex || loadedBookContent) {
                 if positionAnimated {
                     handleUserInteraction()
                     scrollToCharacter(pendingPosition.characterOffset, animated: true)
@@ -273,9 +300,18 @@ struct NativeReaderView: NSViewRepresentable {
                 schedulePositionRestoration()
                 consumePendingPosition()
             }
+            if let preservedPosition {
+                positionBeingRestored = preservedPosition
+                isRestoringPosition = true
+            }
         }
 
         func loadSectionIfNeeded() {
+            if loadedBookContent, case .scrolling(.book) = settings.flow, loadedSettings == settings {
+                currentSectionIndex = requestedSectionIndex
+                reportProgress()
+                return
+            }
             guard currentSectionIndex != requestedSectionIndex || loadedSettings != settings else { return }
             guard let book, let textView, let scrollView else { return }
             let previousSectionIndex = currentSectionIndex
@@ -288,14 +324,8 @@ struct NativeReaderView: NSViewRepresentable {
             stopSpeech()
             let appearance = NativeReaderAppearance(theme: settings.theme)
             do {
-                let document = try loader.loadDocument(
-                    book: book,
-                    sectionIndex: requestedSectionIndex,
-                    fontSize: settings.fontSize,
-                    lineHeight: settings.lineHeight,
-                    foreground: appearance.foreground
-                )
-                let attributedText = document.attributedText
+                let loaded = try loadContent(book: book, appearance: appearance)
+                let attributedText = loaded.document.attributedText
                 textView.backgroundColor = appearance.background
                 textView.insertionPointColor = appearance.accent
                 textView.selectedTextAttributes = [
@@ -307,20 +337,31 @@ struct NativeReaderView: NSViewRepresentable {
                     vertical: max(52, settings.margin)
                 )
                 renderedAnnotationRanges.removeAll()
+                if settings.flow.isPaging,
+                   previousSectionIndex >= 0,
+                   previousSectionIndex != requestedSectionIndex {
+                    addSectionTransition(
+                        direction: requestedSectionIndex > previousSectionIndex ? 1 : -1
+                    )
+                }
                 textView.textStorage?.setAttributedString(attributedText)
                 scrollView.backgroundColor = appearance.background
                 currentSectionIndex = requestedSectionIndex
-                anchors = document.anchors
+                anchors = loaded.document.anchors
+                sectionRanges = loaded.ranges
+                sectionIndices = loaded.indices
+                sectionAnchors = loaded.sectionAnchors
+                loadedBookContent = loaded.isBook
                 loadedSettings = settings
                 applyAnnotations()
                 updateDocumentLayout()
-                if let pendingAnchor, let location = anchors[pendingAnchor] {
-                    scrollToCharacter(location, animated: false)
+                if let pendingAnchor, let location = anchorLocation(pendingAnchor) {
+                    scrollToCharacter(location, animated: false, locationIsGlobal: loadedBookContent)
                     consumePendingAnchor()
                 } else if pendingAnchor != nil {
                     consumePendingAnchor()
                 } else if let positionBeingRestored,
-                          isPositionForCurrentSection(positionBeingRestored) {
+                          isPositionLoaded(positionBeingRestored) {
                     if pendingPositionAnimated {
                         handleUserInteraction()
                         scrollToCharacter(positionBeingRestored.characterOffset, animated: true)
@@ -341,6 +382,10 @@ struct NativeReaderView: NSViewRepresentable {
                 } else {
                     scrollView.contentView.scroll(to: .zero)
                     scrollView.reflectScrolledClipView(scrollView.contentView)
+                }
+                if let pendingPageSeekFraction, settings.flow.isPaging {
+                    self.pendingPageSeekFraction = nil
+                    scroll(to: CGFloat(pendingPageSeekFraction) * maximumScrollOffset(), animated: false)
                 }
                 reportProgress()
             } catch {
@@ -379,6 +424,7 @@ struct NativeReaderView: NSViewRepresentable {
             }
             scrollObserver = nil
             (scrollView as? ReaderScrollView)?.onUserScroll = nil
+            (scrollView as? ReaderScrollView)?.pageTurn = nil
             onProgress = { _, _ in }
             onBoundary = { _ in }
             onSpeakingChanged = { _ in }
@@ -395,6 +441,11 @@ struct NativeReaderView: NSViewRepresentable {
             speech.stop()
             speechRange = nil
             renderedAnnotationRanges.removeAll()
+            sectionRanges.removeAll()
+            sectionIndices.removeAll()
+            sectionAnchors.removeAll()
+            loadedBookContent = false
+            pendingPageSeekFraction = nil
             textView?.onHighlight = nil
             textView?.onNote = nil
             textView?.onSpeak = nil
@@ -409,7 +460,7 @@ struct NativeReaderView: NSViewRepresentable {
                 self.restorationTaskScheduled = false
                 guard self.isRestoringPosition,
                       let position = self.positionBeingRestored,
-                      self.isPositionForCurrentSection(position) else { return }
+                      self.isPositionLoaded(position) else { return }
                 self.scrollToCharacter(position.characterOffset, animated: false)
             }
         }
@@ -442,8 +493,119 @@ struct NativeReaderView: NSViewRepresentable {
             return spineIdentity(book.spine[currentSectionIndex]) == position.spineID
         }
 
+        private func isPositionLoaded(_ position: ReadingPosition) -> Bool {
+            if loadedBookContent {
+                return sectionRanges[position.spineID] != nil
+            }
+            return isPositionForCurrentSection(position)
+        }
+
+        private func anchorLocation(_ anchor: String) -> Int? {
+            guard loadedBookContent,
+                  let book,
+                  book.spine.indices.contains(requestedSectionIndex) else {
+                return anchors[anchor]
+            }
+            let identity = spineIdentity(book.spine[requestedSectionIndex])
+            guard let localLocation = sectionAnchors[identity]?[anchor] else { return nil }
+            return (sectionRanges[identity]?.location ?? 0) + localLocation
+        }
+
+        private func localizedAnnotationRange(_ range: NSRange) -> NSRange {
+            guard loadedBookContent,
+                  let section = sectionRanges.first(where: {
+                      NSIntersectionRange(range, $0.value).length > 0
+                  }),
+                  let sectionIndex = sectionIndices[section.key] else {
+                return range
+            }
+            currentSectionIndex = sectionIndex
+            return NSRange(
+                location: max(0, range.location - section.value.location),
+                length: range.length
+            )
+        }
+
+        private func currentReadingPosition() -> ReadingPosition? {
+            guard let book,
+                  !book.spine.isEmpty,
+                  book.spine.indices.contains(currentSectionIndex) else { return nil }
+            let visibleLocation = firstVisibleCharacterLocation()
+            var index = currentSectionIndex
+            var localLocation = visibleLocation
+            if loadedBookContent,
+               let visibleSection = sectionRanges.first(where: { NSLocationInRange(visibleLocation, $0.value) }),
+               let visibleIndex = sectionIndices[visibleSection.key] {
+                index = visibleIndex
+                localLocation = visibleLocation - visibleSection.value.location
+            }
+            return ReadingPosition(
+                spineID: spineIdentity(book.spine[index]),
+                characterOffset: max(0, localLocation)
+            )
+        }
+
         private func spineIdentity(_ item: EPUBSpineItem) -> String {
             item.id.isEmpty ? item.href : item.id
+        }
+
+        private func loadContent(
+            book: BookSummary,
+            appearance: NativeReaderAppearance
+        ) throws -> (document: NativeChapterDocument, ranges: [String: NSRange], indices: [String: Int], sectionAnchors: [String: [String: Int]], isBook: Bool) {
+            guard case .scrolling(.book) = settings.flow else {
+                let document = try loader.loadDocument(
+                    book: book,
+                    sectionIndex: requestedSectionIndex,
+                    fontSize: settings.fontSize,
+                    lineHeight: settings.lineHeight,
+                    foreground: appearance.foreground
+                )
+                let identity = book.spine.indices.contains(requestedSectionIndex)
+                    ? spineIdentity(book.spine[requestedSectionIndex])
+                    : ""
+                return (document, identity.isEmpty ? [:] : [identity: NSRange(location: 0, length: document.attributedText.length)], identity.isEmpty ? [:] : [identity: requestedSectionIndex], identity.isEmpty ? [:] : [identity: document.anchors], false)
+            }
+
+            let combined = NSMutableAttributedString()
+            var anchors: [String: Int] = [:]
+            var ranges: [String: NSRange] = [:]
+            var indices: [String: Int] = [:]
+            var sectionAnchors: [String: [String: Int]] = [:]
+            let startedAt = Date()
+            logger.info("开始加载全书内容: chapters=\(book.spine.count, privacy: .public)")
+            for index in book.spine.indices {
+                let chapter = try loader.loadDocument(
+                    book: book,
+                    sectionIndex: index,
+                    fontSize: settings.fontSize,
+                    lineHeight: settings.lineHeight,
+                    foreground: appearance.foreground
+                )
+                if combined.length > 0 {
+                    combined.append(NSAttributedString(string: "\n\n"))
+                }
+                let start = combined.length
+                combined.append(chapter.attributedText)
+                let identity = spineIdentity(book.spine[index])
+                ranges[identity] = NSRange(location: start, length: chapter.attributedText.length)
+                indices[identity] = index
+                sectionAnchors[identity] = chapter.anchors
+                for (anchor, location) in chapter.anchors {
+                    anchors[anchor] = start + location
+                }
+                if index == book.spine.startIndex || index == book.spine.index(before: book.spine.endIndex) || index.isMultiple(of: 8) {
+                    logger.info("全书加载进度: chapter=\(index + 1)/\(book.spine.count, privacy: .public)")
+                }
+            }
+            logger.info("全书内容加载完成: characters=\(combined.length, privacy: .public), seconds=\(Date().timeIntervalSince(startedAt), privacy: .public)")
+            return (
+                NativeChapterDocument(attributedText: combined, anchors: anchors),
+                ranges,
+                indices,
+                sectionAnchors,
+                true
+            )
         }
 
         private func openLink(_ url: URL) {
@@ -461,11 +623,25 @@ struct NativeReaderView: NSViewRepresentable {
             onNavigate(sectionIndex, url.fragment?.removingPercentEncoding)
         }
 
-        private func scrollToCharacter(_ location: Int, animated: Bool) {
+        private func scrollToCharacter(
+            _ location: Int,
+            animated: Bool,
+            locationIsGlobal: Bool = false
+        ) {
             guard let textView, let scrollView else { return }
             let length = (textView.string as NSString).length
             guard length > 0 else { return }
-            let clampedLocation = min(max(location, 0), length - 1)
+            let globalLocation: Int
+            if loadedBookContent,
+               !locationIsGlobal,
+               let book,
+               book.spine.indices.contains(requestedSectionIndex) {
+                let identity = spineIdentity(book.spine[requestedSectionIndex])
+                globalLocation = (sectionRanges[identity]?.location ?? 0) + location
+            } else {
+                globalLocation = location
+            }
+            let clampedLocation = min(max(globalLocation, 0), length - 1)
             let range = NSRange(location: clampedLocation, length: 1)
             let scroll = {
                 textView.scrollRangeToVisible(range)
@@ -550,7 +726,19 @@ struct NativeReaderView: NSViewRepresentable {
 
             let appearance = NativeReaderAppearance(theme: settings.theme)
             for annotation in annotations where annotation.sectionIndex == currentSectionIndex {
-                let range = NSIntersectionRange(annotation.range, fullRange)
+                let globalRange: NSRange
+                if loadedBookContent,
+                   let book,
+                   book.spine.indices.contains(annotation.sectionIndex) {
+                    let identity = spineIdentity(book.spine[annotation.sectionIndex])
+                    globalRange = NSRange(
+                        location: (sectionRanges[identity]?.location ?? 0) + annotation.range.location,
+                        length: annotation.range.length
+                    )
+                } else {
+                    globalRange = annotation.range
+                }
+                let range = NSIntersectionRange(globalRange, fullRange)
                 guard range.length > 0 else { continue }
                 if annotation.kind == "note" {
                     layoutManager.addTemporaryAttributes([
@@ -623,20 +811,49 @@ struct NativeReaderView: NSViewRepresentable {
             let current = clipView.bounds.origin.y
             let maximum = maximumScrollOffset()
             if direction > 0, current >= maximum - 2 {
+                if settings.flow.scrollScope == .book {
+                    return
+                }
                 notifyBoundary(1)
                 return
             }
             if direction < 0, current <= 2 {
+                if settings.flow.scrollScope == .book {
+                    return
+                }
                 notifyBoundary(-1)
                 return
             }
-            let amount = max(240, clipView.bounds.height * 0.88)
+            let columns = settings.flow.pageColumns.rawValue
+            let amount = max(240, clipView.bounds.height * 0.94 * CGFloat(columns))
             let next = min(maximum, max(0, current + CGFloat(direction) * amount))
-            scroll(to: next, animated: true)
+            animatePageTransition(direction: direction) {
+                self.scroll(to: next, animated: false)
+            }
         }
 
         private func seek(to fraction: Double, animated: Bool) {
             let normalized = min(max(fraction, 0), 1)
+            if settings.flow.isPaging,
+               let book,
+               !book.spine.isEmpty {
+                let scaled = normalized * Double(book.spine.count)
+                let targetIndex = min(book.spine.count - 1, Int(scaled))
+                let localFraction = targetIndex == book.spine.count - 1
+                    ? min(1, max(0, scaled - Double(targetIndex)))
+                    : scaled - Double(targetIndex)
+                if targetIndex != currentSectionIndex {
+                    pendingPageSeekFraction = localFraction
+                    let callback = onNavigate
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, !self.isTornDown else { return }
+                        callback(targetIndex, nil)
+                    }
+                    return
+                }
+                scroll(to: localFraction * maximumScrollOffset(), animated: animated)
+                return
+            }
             scroll(to: CGFloat(normalized) * maximumScrollOffset(), animated: animated)
         }
 
@@ -651,6 +868,38 @@ struct NativeReaderView: NSViewRepresentable {
             scrollView.reflectScrolledClipView(clipView)
         }
 
+        private func animatePageTransition(direction: Int, change: () -> Void) {
+            guard let scrollView, settings.flow.isPaging,
+                  let readerScrollView = scrollView as? ReaderScrollView else {
+                change()
+                return
+            }
+            readerScrollView.animatePageTransition(
+                orientation: settings.flow.pageOrientation ?? .vertical,
+                direction: direction,
+                change: change
+            )
+        }
+
+        private func addSectionTransition(direction: Int) {
+            guard let textView else { return }
+            let transition = CATransition()
+            transition.type = .push
+            transition.subtype = transitionSubtype(direction: direction)
+            transition.duration = 0.3
+            transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            textView.layer?.add(transition, forKey: "reader.section.transition")
+        }
+
+        private func transitionSubtype(direction: Int) -> CATransitionSubtype {
+            switch settings.flow.pageOrientation {
+            case .horizontal:
+                return direction > 0 ? .fromRight : .fromLeft
+            case .vertical, .none:
+                return direction > 0 ? .fromBottom : .fromTop
+            }
+        }
+
         private func scrollToEnd() {
             guard let scrollView else { return }
             let maximum = maximumScrollOffset()
@@ -660,14 +909,32 @@ struct NativeReaderView: NSViewRepresentable {
 
         private func reportProgress() {
             guard !isRestoringPosition,
-                  let scrollView, let book, book.spine.indices.contains(currentSectionIndex) else { return }
+                  let scrollView, let book else { return }
             let maximum = maximumScrollOffset()
             let fraction = maximum > 0 ? scrollView.contentView.bounds.origin.y / maximum : 0
+            let visibleLocation = firstVisibleCharacterLocation()
+            if loadedBookContent,
+               let visibleSection = sectionRanges.first(where: { NSLocationInRange(visibleLocation, $0.value) }),
+               let sectionIndex = sectionIndices[visibleSection.key] {
+                currentSectionIndex = sectionIndex
+            }
+            guard book.spine.indices.contains(currentSectionIndex) else { return }
+            let identity = spineIdentity(book.spine[currentSectionIndex])
+            let localLocation: Int
+            let overallFraction: Double
+            if loadedBookContent,
+               let range = sectionRanges[identity] {
+                localLocation = max(0, min(range.length - 1, visibleLocation - range.location))
+                overallFraction = maximum > 0 ? Double(scrollView.contentView.bounds.origin.y / maximum) : 0
+            } else {
+                localLocation = visibleLocation
+                overallFraction = fraction
+            }
             let position = ReadingPosition(
-                spineID: spineIdentity(book.spine[currentSectionIndex]),
-                characterOffset: firstVisibleCharacterLocation()
+                spineID: identity,
+                characterOffset: localLocation
             )
-            notifyProgress(min(1, max(0, fraction)), position: position)
+            notifyProgress(min(1, max(0, overallFraction)), position: position)
         }
 
         private func firstVisibleCharacterLocation() -> Int {
