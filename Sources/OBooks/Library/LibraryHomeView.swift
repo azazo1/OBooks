@@ -29,7 +29,7 @@ struct LibraryHomeView: View {
                         emptyShelf
                     } else {
                         ScrollView(.horizontal) {
-                            LazyHStack(spacing: 18) {
+                            LazyHStack(alignment: .top, spacing: 18) {
                                 ForEach(continueBooks) { book in
                                     ContinueBookCard(
                                         book: book,
