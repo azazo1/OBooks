@@ -8,11 +8,12 @@ private final class ReaderProgressState: ObservableObject {
     @Published private(set) var value = 0.0
     private var persistenceTask: Task<Void, Never>?
     private var latestPersistValue: Double?
+    private var latestPersistPosition: ReadingPosition?
     private var persistenceRevision = 0
     private var persistencePending = false
-    private var onPersist: ((Double) -> Void)?
+    private var onPersist: ((Double, ReadingPosition) -> Void)?
 
-    func configure(onPersist: @escaping (Double) -> Void) {
+    func configure(onPersist: @escaping (Double, ReadingPosition) -> Void) {
         self.onPersist = onPersist
     }
 
@@ -20,16 +21,18 @@ private final class ReaderProgressState: ObservableObject {
         self.value = min(max(value, 0), 1)
     }
 
-    func update(_ value: Double, persistValue: Double) {
+    func update(_ value: Double, persistValue: Double, position: ReadingPosition) {
         let normalizedValue = min(max(value, 0), 1)
         let normalizedPersistValue = min(max(persistValue, 0), 1)
         let valueChanged = abs(self.value - normalizedValue) > 0.0001
         let persistChanged = latestPersistValue != normalizedPersistValue
+        let positionChanged = latestPersistPosition != position
         latestPersistValue = normalizedPersistValue
+        latestPersistPosition = position
         if valueChanged {
             self.value = normalizedValue
         }
-        guard valueChanged || persistChanged else { return }
+        guard valueChanged || persistChanged || positionChanged else { return }
         persistenceRevision &+= 1
         persistencePending = true
         guard persistenceTask == nil else { return }
@@ -41,8 +44,9 @@ private final class ReaderProgressState: ObservableObject {
                 guard revision == self.persistenceRevision else { continue }
                 self.persistencePending = false
                 self.persistenceTask = nil
-                if let persistValue = self.latestPersistValue {
-                    self.onPersist?(persistValue)
+                if let persistValue = self.latestPersistValue,
+                   let position = self.latestPersistPosition {
+                    self.onPersist?(persistValue, position)
                 }
                 return
             }
@@ -52,9 +56,11 @@ private final class ReaderProgressState: ObservableObject {
     func flush() {
         persistenceTask?.cancel()
         persistenceTask = nil
-        if persistencePending, let persistValue = latestPersistValue {
+        if persistencePending,
+           let persistValue = latestPersistValue,
+           let position = latestPersistPosition {
             persistencePending = false
-            onPersist?(persistValue)
+            onPersist?(persistValue, position)
         }
     }
 }
@@ -92,6 +98,7 @@ struct ReaderView: View {
     @State private var controller = ReaderController()
     @State private var sectionIndex = 0
     @State private var pendingAnchor: String?
+    @State private var pendingPosition: ReadingPosition?
     @State private var progressState = ReaderProgressState()
     @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
@@ -118,16 +125,18 @@ struct ReaderView: View {
                 book: book,
                 sectionIndex: $sectionIndex,
                 pendingAnchor: $pendingAnchor,
+                pendingPosition: $pendingPosition,
                 theme: theme,
                 fontSize: fontSize,
                 lineHeight: lineHeight,
                 margin: margin,
                 annotations: annotations,
                 controller: controller,
-                onProgress: { value in
+                onProgress: { value, position in
                     let count = Double(max(book.spine.count, 1))
-                    let overall = min(1, Double(sectionIndex) / count + value / count)
-                    progressState.update(value, persistValue: overall)
+                    let currentIndex = book.spine.firstIndex { spineIdentity($0) == position.spineID } ?? sectionIndex
+                     let overall = min(1, Double(currentIndex) / count + value / count)
+                    progressState.update(value, persistValue: overall, position: position)
                 },
                 onBoundary: moveSection,
                 onSpeakingChanged: { value in
@@ -152,6 +161,10 @@ struct ReaderView: View {
                 },
                 onAnchorConsumed: {
                     pendingAnchor = nil
+                     pendingPosition = nil
+                 },
+                 onPositionConsumed: {
+                     pendingPosition = nil
                 }
             )
 
@@ -182,8 +195,9 @@ struct ReaderView: View {
         .background(chromeBackground)
         .onAppear {
             sectionIndex = initialSectionIndex
-            progressState.configure { fraction in
-                appModel.updateProgress(bookID: book.id, fraction: fraction)
+            pendingPosition = initialReadingPosition
+            progressState.configure { fraction, position in
+                appModel.updateProgress(bookID: book.id, fraction: fraction, position: position)
             }
             progressState.setInitialValue(book.progressFraction)
             if colorScheme == .light && theme == .focus {
@@ -598,8 +612,22 @@ struct ReaderView: View {
     }
 
     private var initialSectionIndex: Int {
+        if let position = book.readingPosition,
+           let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID }) {
+            return index
+        }
         guard !book.spine.isEmpty else { return 0 }
         return min(book.spine.count - 1, Int(book.progressFraction * Double(book.spine.count)))
+    }
+
+    private var initialReadingPosition: ReadingPosition? {
+        guard let position = book.readingPosition,
+              book.spine.contains(where: { spineIdentity($0) == position.spineID }) else { return nil }
+        return position
+    }
+
+    private func spineIdentity(_ item: EPUBSpineItem) -> String {
+        item.id.isEmpty ? item.href : item.id
     }
 
     private func keepChromeVisible() {

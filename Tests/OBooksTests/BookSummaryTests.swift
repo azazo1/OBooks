@@ -36,6 +36,30 @@ final class BookSummaryTests: XCTestCase {
         XCTAssertTrue(restoredBook.isFinished)
     }
 
+    func testReadingPositionRoundTrips() throws {
+        var book = makeBook(progressFraction: 0.42)
+        let position = ReadingPosition(spineID: "chapter-2", characterOffset: 1234)
+        book.readingPosition = position
+
+        let restored = try JSONDecoder().decode(BookSummary.self, from: JSONEncoder().encode(book))
+
+        XCTAssertEqual(restored.readingPosition, position)
+    }
+
+    func testMalformedReadingPositionIsIgnored() throws {
+        let book = makeBook(progressFraction: 0.42)
+        let data = try JSONEncoder().encode(book)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["readingPosition"] = ["spineID": 42, "characterOffset": "invalid"]
+
+        let restored = try JSONDecoder().decode(
+            BookSummary.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertNil(restored.readingPosition)
+    }
+
     private func makeBook(progressFraction: Double) -> BookSummary {
         BookSummary(
             id: UUID(),

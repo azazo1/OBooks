@@ -22,6 +22,16 @@ enum ReadingTheme: String, CaseIterable, Identifiable {
     }
 }
 
+struct ReadingPosition: Codable, Hashable, Sendable {
+    let spineID: String
+    let characterOffset: Int
+
+    init(spineID: String, characterOffset: Int) {
+        self.spineID = spineID
+        self.characterOffset = characterOffset
+    }
+}
+
 enum ReaderAction: Equatable {
     case nextPage
     case previousPage

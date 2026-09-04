@@ -161,15 +161,22 @@ final class AppModel: ObservableObject {
         readerDelegates.removeValue(forKey: bookID)
     }
 
-    func updateProgress(bookID: UUID, fraction: Double) {
+    func updateProgress(bookID: UUID, fraction: Double, position: ReadingPosition? = nil) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else {
             return
         }
         let normalized = min(max(fraction, 0), 1)
-        guard abs(books[index].progressFraction - normalized) > 0.005 else {
+        let progressChanged = abs(books[index].progressFraction - normalized) > 0.005
+        let positionChanged = position != nil && books[index].readingPosition != position
+        guard progressChanged || positionChanged else {
             return
         }
-        books[index].progressFraction = normalized
+        if progressChanged {
+            books[index].progressFraction = normalized
+        }
+        if let position {
+            books[index].readingPosition = position
+        }
         books[index].lastOpenedAt = Date()
         scheduleProgressSave()
     }

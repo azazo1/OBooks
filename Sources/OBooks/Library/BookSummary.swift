@@ -11,6 +11,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
     var spine: [EPUBSpineItem]
     var toc: [EPUBTOCItem]
     var progressFraction: Double
+    var readingPosition: ReadingPosition?
     var isFinished: Bool
     var lastOpenedAt: Date?
     let importedAt: Date
@@ -30,7 +31,8 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         progressFraction: Double,
         lastOpenedAt: Date?,
         importedAt: Date,
-        isFinished: Bool = false
+        isFinished: Bool = false,
+        readingPosition: ReadingPosition? = nil
     ) {
         self.id = id
         self.title = title
@@ -43,6 +45,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         self.toc = toc
         self.progressFraction = progressFraction
         self.isFinished = isFinished
+        self.readingPosition = readingPosition
         self.lastOpenedAt = lastOpenedAt
         self.importedAt = importedAt
     }
@@ -70,6 +73,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         case spine
         case toc
         case progressFraction
+        case readingPosition
         case isFinished
         case lastOpenedAt
         case importedAt
@@ -87,6 +91,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         spine = try container.decode([EPUBSpineItem].self, forKey: .spine)
         toc = try container.decode([EPUBTOCItem].self, forKey: .toc)
         progressFraction = try container.decode(Double.self, forKey: .progressFraction)
+        readingPosition = try? container.decodeIfPresent(ReadingPosition.self, forKey: .readingPosition)
         isFinished = try container.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
         lastOpenedAt = try container.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         importedAt = try container.decode(Date.self, forKey: .importedAt)
@@ -104,6 +109,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         try container.encode(spine, forKey: .spine)
         try container.encode(toc, forKey: .toc)
         try container.encode(progressFraction, forKey: .progressFraction)
+        try container.encodeIfPresent(readingPosition, forKey: .readingPosition)
         try container.encode(isFinished, forKey: .isFinished)
         try container.encodeIfPresent(lastOpenedAt, forKey: .lastOpenedAt)
         try container.encode(importedAt, forKey: .importedAt)

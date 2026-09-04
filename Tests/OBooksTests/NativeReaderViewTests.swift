@@ -51,18 +51,20 @@ final class NativeReaderViewTests: XCTestCase {
             book: book,
             sectionIndex: 0,
             pendingAnchor: nil,
+             pendingPosition: nil,
             theme: .focus,
             fontSize: 18,
             lineHeight: 1.7,
             margin: 56,
             annotations: [],
-            onProgress: { _ in },
+            onProgress: { _, _ in },
             onBoundary: { _ in },
             onSpeakingChanged: { speakingStates.append($0) },
             onAnnotation: { _, _, _ in },
             onNoteRequest: { _, _ in },
             onNavigate: { _, _ in },
-            onAnchorConsumed: {}
+            onAnchorConsumed: {},
+             onPositionConsumed: {}
         )
 
         coordinator.teardown()
