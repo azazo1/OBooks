@@ -1,19 +1,5 @@
 import Foundation
 
-enum ReadingFlow: String, CaseIterable, Identifiable {
-    case paginated
-    case scrolled
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .paginated: return "分页"
-        case .scrolled: return "滚动"
-        }
-    }
-}
-
 enum ReadingTheme: String, CaseIterable, Identifiable {
     case original
     case quiet
@@ -41,14 +27,23 @@ enum ReaderAction: Equatable {
     case previousPage
     case toggleSpeech
     case stopSpeech
-    case speakText(String)
 }
 
 struct ReaderAnnotation: Identifiable, Equatable {
     let id = UUID()
     let text: String
     let kind: String
+    let sectionIndex: Int
+    let range: NSRange
+
+    init(text: String, kind: String, sectionIndex: Int, range: NSRange) {
+        self.text = text
+        self.kind = kind
+        self.sectionIndex = sectionIndex
+        self.range = range
+    }
 }
+
 struct ReaderCommand: Equatable, Identifiable {
     let id = UUID()
     let action: ReaderAction

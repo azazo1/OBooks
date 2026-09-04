@@ -12,10 +12,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "OBooks",
-            path: "Sources/OBooks",
-            resources: [
-                .process("Resources")
-            ]
+            path: "Sources/OBooks"
         ),
         .testTarget(
             name: "OBooksTests",

@@ -35,7 +35,6 @@ struct ReaderView: View {
     @StateObject private var controller = ReaderController()
     @State private var sectionIndex = 0
     @State private var progress = 0.0
-    @State private var flow: ReadingFlow = .paginated
     @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
     @State private var lineHeight = 1.7
@@ -45,28 +44,26 @@ struct ReaderView: View {
     @State private var searchQuery = ""
     @State private var isSpeaking = false
     @State private var chromeVisible = true
+    @State private var isPointerNearChrome = false
     @State private var hideChromeTask: Task<Void, Never>?
     @State private var annotations: [ReaderAnnotation] = []
     @State private var noteContext = ""
     @State private var noteText = ""
+    @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var isEditingNote = false
 
     var body: some View {
         ZStack(alignment: .top) {
             chromeBackground.ignoresSafeArea()
-             ReaderMouseTracker {
-                 revealChrome()
-             }
-             .allowsHitTesting(false)
 
-            ReaderWebView(
+            NativeReaderView(
                 book: book,
                 sectionIndex: $sectionIndex,
-                flow: flow,
                 theme: theme,
                 fontSize: fontSize,
                 lineHeight: lineHeight,
                 margin: margin,
+                annotations: annotations,
                 controller: controller,
                 onProgress: { value in
                     progress = value
@@ -78,22 +75,21 @@ struct ReaderView: View {
                 onSpeakingChanged: { value in
                     isSpeaking = value
                 },
-                onAnnotation: { text, kind in
+                onAnnotation: { text, kind, range in
                     guard !text.isEmpty else { return }
-                    if kind == "speech" {
-                         controller.send(.speakText(text))
-                     } else {
-                         annotations.insert(ReaderAnnotation(text: text, kind: kind), at: 0)
-                     }
+                    annotations.insert(
+                        ReaderAnnotation(text: text, kind: kind, sectionIndex: sectionIndex, range: range),
+                        at: 0
+                    )
                 },
-                onNoteRequest: { text in
+                onNoteRequest: { text, range in
                     noteContext = text
+                    noteRange = range
                     noteText = ""
                     isEditingNote = true
+                    keepChromeVisible()
                 }
             )
-            .padding(.top, 52)
-            .padding(.bottom, 48)
 
             topBar
 
@@ -104,13 +100,13 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) {
             readerFooter
         }
-                .overlay {
-             ReaderMouseTracker {
-                 revealChrome()
-             }
-             .allowsHitTesting(false)
-         }
-         .overlay(alignment: .bottomTrailing) {
+        .overlay {
+            ReaderMouseTracker(chromeVisible: chromeVisible, edgeThreshold: 88) { isNear in
+                updateChromeProximity(isNear)
+            }
+            .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomTrailing) {
             if isEditingNote {
                 noteEditor
                     .padding(.trailing, 24)
@@ -123,9 +119,10 @@ struct ReaderView: View {
         .onAppear {
             sectionIndex = initialSectionIndex
             progress = book.progressFraction
-             if colorScheme == .light && theme == .focus {
-                 theme = .paper
-             }
+            if colorScheme == .light && theme == .focus {
+                theme = .paper
+            }
+            scheduleChromeHide(after: .seconds(1.4))
         }
         .onDisappear {
             hideChromeTask?.cancel()
@@ -173,14 +170,15 @@ struct ReaderView: View {
         .padding(.leading, 82)
          .padding(.trailing, 22)
         .frame(height: 52)
-         .opacity(chromeVisible ? 1 : 0)
-         .animation(.easeOut(duration: 0.18), value: chromeVisible)
         .background(chromeBackground.opacity(colorScheme == .dark ? 0.92 : 0.96))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.white.opacity(0.08))
                 .frame(height: 1)
         }
+        .opacity(chromeVisible ? 1 : 0)
+        .allowsHitTesting(chromeVisible)
+        .animation(.easeOut(duration: 0.18), value: chromeVisible)
     }
 
     private func readerButton(systemName: String, help: String, panel: ReaderPanel) -> some View {
@@ -510,8 +508,9 @@ struct ReaderView: View {
             Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)
         }
         .padding(.bottom, 10)
-         .opacity(chromeVisible ? 1 : 0)
-         .animation(.easeOut(duration: 0.18), value: chromeVisible)
+        .opacity(chromeVisible ? 1 : 0)
+        .allowsHitTesting(chromeVisible)
+        .animation(.easeOut(duration: 0.18), value: chromeVisible)
     }
 
     private var noteEditor: some View {
@@ -522,6 +521,7 @@ struct ReaderView: View {
                 Spacer()
                 Button {
                     isEditingNote = false
+                    scheduleChromeHide(after: .milliseconds(650))
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
@@ -539,9 +539,15 @@ struct ReaderView: View {
                 .frame(width: 270, height: 82)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             Button("保存笔记") {
-                guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                annotations.insert(ReaderAnnotation(text: noteText, kind: "note"), at: 0)
+                guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      noteRange.location != NSNotFound,
+                      noteRange.length > 0 else { return }
+                annotations.insert(
+                    ReaderAnnotation(text: noteText, kind: "note", sectionIndex: sectionIndex, range: noteRange),
+                    at: 0
+                )
                 isEditingNote = false
+                scheduleChromeHide(after: .milliseconds(650))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
@@ -577,18 +583,37 @@ struct ReaderView: View {
         return min(book.spine.count - 1, Int(book.progressFraction * Double(book.spine.count)))
     }
 
-    private func revealChrome() {
+    private func keepChromeVisible() {
         chromeVisible = true
         hideChromeTask?.cancel()
+    }
+
+    private func updateChromeProximity(_ isNear: Bool) {
+        isPointerNearChrome = isNear
+        if isNear {
+            keepChromeVisible()
+        } else {
+            scheduleChromeHide(after: .milliseconds(650))
+        }
+    }
+
+    private func scheduleChromeHide(after delay: Duration) {
+        hideChromeTask?.cancel()
+        guard activePanel == nil, !isEditingNote, !isPointerNearChrome else { return }
         hideChromeTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.8))
-            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, activePanel == nil, !isEditingNote, !isPointerNearChrome else { return }
             chromeVisible = false
         }
     }
 
     private func togglePanel(_ panel: ReaderPanel) {
         activePanel = activePanel == panel ? nil : panel
+        if activePanel == nil {
+            scheduleChromeHide(after: .milliseconds(650))
+        } else {
+            keepChromeVisible()
+        }
     }
 
     private func moveSection(_ direction: Int) {

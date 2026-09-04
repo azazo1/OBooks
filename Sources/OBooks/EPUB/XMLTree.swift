@@ -1,10 +1,15 @@
 import Foundation
 
+enum XMLNodeContent {
+    case text(String)
+    case element(XMLNode)
+}
+
 final class XMLNode {
     let name: String
     let attributes: [String: String]
     var children: [XMLNode] = []
-    var text = ""
+    var orderedContent: [XMLNodeContent] = []
 
     init(name: String, attributes: [String: String] = [:]) {
         self.name = name.split(separator: ":").last.map(String.init)?.lowercased() ?? name.lowercased(); self.attributes = attributes
@@ -23,7 +28,14 @@ final class XMLNode {
         for child in children { result.append(contentsOf: child.all(named: name)) }
         return result
     }
-    var textContent: String { text + children.map(\.textContent).joined() }
+    var textContent: String {
+        orderedContent.map { content in
+            switch content {
+            case .text(let value): return value
+            case .element(let node): return node.textContent
+            }
+        }.joined()
+    }
 }
 
 final class XMLTreeParser: NSObject, XMLParserDelegate {
@@ -41,9 +53,16 @@ final class XMLTreeParser: NSObject, XMLParserDelegate {
     }
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
         let node = XMLNode(name: qName ?? elementName, attributes: attributeDict)
-        if let parent = stack.last { parent.children.append(node) } else { root = node }
+        if let parent = stack.last {
+            parent.children.append(node)
+            parent.orderedContent.append(.element(node))
+        } else {
+            root = node
+        }
         stack.append(node)
     }
-    func parser(_ parser: XMLParser, foundCharacters string: String) { stack.last?.text += string }
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        stack.last?.orderedContent.append(.text(string))
+    }
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) { _ = stack.popLast() }
 }
