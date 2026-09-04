@@ -7,7 +7,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
     case all
     case wishlist
     case finished
-    case books
 
     var id: String { rawValue }
 
@@ -17,7 +16,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
         case .all: return "全部"
         case .wishlist: return "欲读清单"
         case .finished: return "已读完"
-        case .books: return "图书"
         }
     }
 
@@ -27,7 +25,6 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
         case .all: return "books.vertical"
         case .wishlist: return "arrow.right.circle"
         case .finished: return "checkmark.circle"
-        case .books: return "book"
         }
     }
 }
@@ -57,7 +54,7 @@ struct LibraryView: View {
             query.isEmpty || book.title.localizedCaseInsensitiveContains(query) || book.authorLabel.localizedCaseInsensitiveContains(query)
         }
         switch destination {
-        case .home, .all, .books:
+        case .home, .all:
             return matching
         case .wishlist:
             return matching.filter { $0.progressFraction == 0 }

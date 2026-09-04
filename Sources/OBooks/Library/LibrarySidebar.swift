@@ -46,7 +46,6 @@ struct LibrarySidebar: View {
                 SidebarRow(destination: .all, selection: $selection)
                 SidebarRow(destination: .wishlist, selection: $selection)
                 SidebarRow(destination: .finished, selection: $selection)
-                SidebarRow(destination: .books, selection: $selection)
             }
 
             Spacer(minLength: 18)
