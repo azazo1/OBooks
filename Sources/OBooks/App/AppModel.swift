@@ -78,6 +78,7 @@ final class AppModel: ObservableObject {
 
     func openReader(_ book: BookSummary) {
         if let window = readerWindows[book.id] {
+            AppWindowConfiguration.applyPrimaryStageBehavior(window)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -85,21 +86,28 @@ final class AppModel: ObservableObject {
 
         let reader = ReaderView(book: book)
             .environmentObject(self)
+        let hostingController = NSHostingController(rootView: reader)
+        hostingController.sizingOptions = [.minSize]
+
+        let initialSize = NSSize(width: 1180, height: 760)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+            contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
-            defer: false
+            defer: true
         )
         window.title = book.title
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
         window.isMovableByWindowBackground = true
         window.backgroundColor = .windowBackgroundColor
-        window.contentViewController = NSHostingController(rootView: reader)
-        window.center()
+        window.contentViewController = hostingController
+        window.setContentSize(initialSize)
+        AppWindowConfiguration.applyPrimaryStageBehavior(window)
+        AppWindowConfiguration.centerOnScreen(window)
         let delegate = ReaderWindowDelegate { [weak self] closingWindow in
             guard let self, self.readerWindows[book.id] === closingWindow else { return }
             let retainedWindow = self.readerWindows[book.id]
@@ -113,6 +121,7 @@ final class AppModel: ObservableObject {
         readerDelegates[book.id] = delegate
         readerWindows[book.id] = window
         window.makeKeyAndOrderFront(nil)
+        AppWindowConfiguration.centerOnScreen(window)
         NSApp.activate(ignoringOtherApps: true)
     }
 

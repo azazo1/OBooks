@@ -8,8 +8,13 @@ struct OBooksApp: App {
         WindowGroup("OBooks") {
             LibraryView()
                 .environmentObject(appModel)
+                .background {
+                    PrimaryWindowConfigurator()
+                        .allowsHitTesting(false)
+                }
         }
         .windowStyle(.hiddenTitleBar)
+        .defaultPosition(.center)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("导入 EPUB") {
