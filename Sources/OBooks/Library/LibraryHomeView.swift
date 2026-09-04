@@ -10,7 +10,7 @@ struct LibraryHomeView: View {
     let onToggleFinished: (BookSummary) -> Void
 
     private var continueBooks: [BookSummary] {
-        books.filter { !$0.isFinished }.sorted { lhs, rhs in
+        books.sorted { lhs, rhs in
             (lhs.lastOpenedAt ?? lhs.importedAt) > (rhs.lastOpenedAt ?? rhs.importedAt)
         }.prefix(3).map { $0 }
     }
