@@ -18,6 +18,9 @@ final class OBooksApplicationDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureNormalWindows()
+        DispatchQueue.main.async { [weak self] in
+            self?.focusPrimaryWindow()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -51,6 +54,16 @@ final class OBooksApplicationDelegate: NSObject, NSApplicationDelegate {
         for window in NSApp.windows where window.level == .normal {
             AppWindowConfiguration.applyPrimaryStageBehavior(window)
         }
+    }
+
+    private func focusPrimaryWindow() {
+        guard let window = NSApp.mainWindow
+            ?? NSApp.windows.first(where: { $0.level == .normal && $0.canBecomeKey }) else {
+            return
+        }
+        AppWindowConfiguration.applyPrimaryStageBehavior(window)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     private func configureWindow(from notification: Notification) {
