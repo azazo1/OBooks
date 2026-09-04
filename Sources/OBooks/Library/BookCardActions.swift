@@ -7,7 +7,7 @@ struct FinishBookMenuItem: View {
     var body: some View {
         Button(action: onToggleFinished) {
             Label(
-                isFinished ? "取消已读完" : "标记为已读完",
+                isFinished ? "标记为仍在读" : "标记为已读完",
                 systemImage: isFinished ? "arrow.uturn.backward" : "checkmark.circle"
             )
         }
