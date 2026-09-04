@@ -30,9 +30,8 @@ final class ReaderTextView: NSTextView {
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let requiredHeight = max(minimumHeight, ceil(usedRect.maxY + verticalInset * 2))
-        if abs(frame.height - requiredHeight) > 0.5 {
-            super.setFrameSize(NSSize(width: frame.width, height: requiredHeight))
-        }
+        guard abs(frame.height - requiredHeight) > 0.5 else { return }
+        super.setFrameSize(NSSize(width: frame.width, height: requiredHeight))
         window?.invalidateCursorRects(for: self)
     }
 
@@ -43,7 +42,6 @@ final class ReaderTextView: NSTextView {
         if widthChanged {
             updateDocumentHeight(minimumHeight: superview?.bounds.height ?? 0)
         }
-        window?.invalidateCursorRects(for: self)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -66,18 +64,28 @@ final class ReaderTextView: NSTextView {
 
     override func resetCursorRects() {
         guard let layoutManager, let textContainer, let textStorage else { return }
-        layoutManager.ensureLayout(for: textContainer)
+        guard !visibleRect.isEmpty else { return }
         let origin = textContainerOrigin
-        for glyphIndex in 0..<layoutManager.numberOfGlyphs {
+        let visibleContainerRect = visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let glyphRange = layoutManager.glyphRange(
+            forBoundingRect: visibleContainerRect,
+            in: textContainer
+        )
+        guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+
+        let string = textStorage.string as NSString
+        for glyphIndex in glyphRange.location..<NSMaxRange(glyphRange) {
             let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
             guard characterIndex < textStorage.length,
                   textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil
             else { continue }
 
-            let character = (textStorage.string as NSString).substring(
-                with: NSRange(location: characterIndex, length: 1)
-            )
-            guard character.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { continue }
+            let characterRange = NSRange(location: characterIndex, length: 1)
+            guard string.rangeOfCharacter(
+                from: .whitespacesAndNewlines,
+                options: [],
+                range: characterRange
+            ).location == NSNotFound else { continue }
 
             let glyphRect = layoutManager.boundingRect(
                 forGlyphRange: NSRange(location: glyphIndex, length: 1),
