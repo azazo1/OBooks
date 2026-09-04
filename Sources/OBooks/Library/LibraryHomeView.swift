@@ -321,25 +321,32 @@ private struct CompactBookCard: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: action) {
                 BookCoverImage(book: book, store: store)
                     .frame(width: 116, height: 164)
-                Text(book.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.84))
-                    .lineLimit(2)
+            }
+            .buttonStyle(.plain)
+
+            HStack(alignment: .top, spacing: 4) {
+                Button(action: action) {
+                    Text(book.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.84))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                BookActionMenu(
+                    isFinished: book.isFinished,
+                    onToggleFinished: onToggleFinished,
+                    onDelete: onDelete
+                )
+                .frame(width: 34, height: 34)
             }
             .frame(width: 116, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-        .overlay(alignment: .bottomTrailing) {
-            BookActionMenu(
-                isFinished: book.isFinished,
-                onToggleFinished: onToggleFinished,
-                onDelete: onDelete
-            )
-            .padding(6)
         }
         .bookContextMenu(
             isFinished: book.isFinished,
