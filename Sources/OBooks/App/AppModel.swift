@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
     private var readerWindows: [UUID: NSWindow] = [:]
     private var readerDelegates: [UUID: ReaderWindowDelegate] = [:]
+    private var progressSaveTask: Task<Void, Never>?
 
     init() {
         let store = LibraryStore()
@@ -125,7 +126,16 @@ final class AppModel: ObservableObject {
         }
         books[index].progressFraction = normalized
         books[index].lastOpenedAt = Date()
-        libraryStore.save(books)
+        scheduleProgressSave()
+    }
+
+    private func scheduleProgressSave() {
+        progressSaveTask?.cancel()
+        progressSaveTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, let self else { return }
+            self.libraryStore.save(self.books)
+        }
     }
 
     private func updateLastOpened(_ bookID: UUID) {

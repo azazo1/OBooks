@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:OBooks}",
+            "name": "Debug OBooks",
+            "target": "OBooks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug OBooks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:OBooks}",
+            "name": "Release OBooks",
+            "target": "OBooks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release OBooks"
+        }
+    ]
+}

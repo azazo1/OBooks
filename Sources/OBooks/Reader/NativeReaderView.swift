@@ -23,7 +23,9 @@ struct NativeReaderView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let initialSize = NSSize(width: 900, height: 680)
-        let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: initialSize))
+        let scrollView = ReaderScrollView(frame: NSRect(origin: .zero, size: initialSize))
+        scrollView.wantsLayer = true
+        scrollView.contentView.wantsLayer = true
         scrollView.drawsBackground = true
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
@@ -32,6 +34,8 @@ struct NativeReaderView: NSViewRepresentable {
         scrollView.borderType = .noBorder
 
         let textView = ReaderTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+        textView.wantsLayer = true
+        textView.layer?.drawsAsynchronously = true
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = true
@@ -129,6 +133,8 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var pendingProgress: Double?
+        private var progressCallbackScheduled = false
         private var isTornDown = false
         var lastCommandID: UUID?
 
@@ -162,7 +168,6 @@ struct NativeReaderView: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.updateDocumentLayout()
                     self?.reportProgress()
                 }
             }
@@ -249,8 +254,8 @@ struct NativeReaderView: NSViewRepresentable {
                 scrollPage(direction: 1)
             case .previousPage:
                 scrollPage(direction: -1)
-            case .seek(let fraction):
-                seek(to: fraction)
+            case .seek(let fraction, let animated):
+                seek(to: fraction, animated: animated)
             case .toggleSpeech:
                 if speech.isSpeaking {
                     stopSpeech()
@@ -264,6 +269,7 @@ struct NativeReaderView: NSViewRepresentable {
 
         func teardown() {
             isTornDown = true
+            (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
             }
@@ -273,6 +279,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
+            pendingProgress = nil
             speech.onRange = nil
             speech.onFinished = nil
             speech.onStateChanged = nil
@@ -372,10 +379,18 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func notifyProgress(_ value: Double) {
-            let callback = onProgress
+            pendingProgress = value
+            guard !progressCallbackScheduled else { return }
+            progressCallbackScheduled = true
             DispatchQueue.main.async { [weak self] in
-                guard let self, !self.isTornDown else { return }
-                callback(value)
+                guard let self else { return }
+                self.progressCallbackScheduled = false
+                guard !self.isTornDown, let value = self.pendingProgress else {
+                    self.pendingProgress = nil
+                    return
+                }
+                self.pendingProgress = nil
+                self.onProgress(value)
             }
         }
 
@@ -403,8 +418,8 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func maximumScrollOffset() -> CGFloat {
-            guard let scrollView else { return 0 }
-            return max(0, updateDocumentLayout() - scrollView.contentView.bounds.height)
+            guard let scrollView, let textView else { return 0 }
+            return max(0, textView.frame.height - scrollView.contentView.bounds.height)
         }
 
         private func scrollPage(direction: Int) {
@@ -422,20 +437,22 @@ struct NativeReaderView: NSViewRepresentable {
             }
             let amount = max(240, clipView.bounds.height * 0.88)
             let next = min(maximum, max(0, current + CGFloat(direction) * amount))
-            clipView.animator().setBoundsOrigin(NSPoint(x: 0, y: next))
-            scrollView.reflectScrolledClipView(clipView)
+            scroll(to: next, animated: true)
         }
 
-        private func seek(to fraction: Double) {
-            guard let scrollView else { return }
-            let maximum = maximumScrollOffset()
+        private func seek(to fraction: Double, animated: Bool) {
             let normalized = min(max(fraction, 0), 1)
-            let offset = CGFloat(normalized) * maximum
-            let clipView = scrollView.contentView
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                clipView.animator().setBoundsOrigin(NSPoint(x: 0, y: offset))
+            scroll(to: CGFloat(normalized) * maximumScrollOffset(), animated: animated)
+        }
+
+        private func scroll(to offset: CGFloat, animated: Bool) {
+            guard let scrollView else { return }
+            if let readerScrollView = scrollView as? ReaderScrollView {
+                readerScrollView.scroll(to: offset, animated: animated)
+                return
             }
+            let clipView = scrollView.contentView
+            clipView.scroll(to: NSPoint(x: 0, y: offset))
             scrollView.reflectScrolledClipView(clipView)
         }
 

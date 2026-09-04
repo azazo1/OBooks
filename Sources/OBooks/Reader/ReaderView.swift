@@ -1,6 +1,63 @@
 import Foundation
 import AppKit
+import Combine
 import SwiftUI
+
+@MainActor
+private final class ReaderProgressState: ObservableObject {
+    @Published private(set) var value = 0.0
+    private var persistenceTask: Task<Void, Never>?
+    private var latestPersistValue: Double?
+    private var persistenceRevision = 0
+    private var persistencePending = false
+    private var onPersist: ((Double) -> Void)?
+
+    func configure(onPersist: @escaping (Double) -> Void) {
+        self.onPersist = onPersist
+    }
+
+    func setInitialValue(_ value: Double) {
+        self.value = min(max(value, 0), 1)
+    }
+
+    func update(_ value: Double, persistValue: Double) {
+        let normalizedValue = min(max(value, 0), 1)
+        let normalizedPersistValue = min(max(persistValue, 0), 1)
+        let valueChanged = abs(self.value - normalizedValue) > 0.0001
+        let persistChanged = latestPersistValue != normalizedPersistValue
+        latestPersistValue = normalizedPersistValue
+        if valueChanged {
+            self.value = normalizedValue
+        }
+        guard valueChanged || persistChanged else { return }
+        persistenceRevision &+= 1
+        persistencePending = true
+        guard persistenceTask == nil else { return }
+        persistenceTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled, let self {
+                let revision = self.persistenceRevision
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+                guard revision == self.persistenceRevision else { continue }
+                self.persistencePending = false
+                self.persistenceTask = nil
+                if let persistValue = self.latestPersistValue {
+                    self.onPersist?(persistValue)
+                }
+                return
+            }
+        }
+    }
+
+    func flush() {
+        persistenceTask?.cancel()
+        persistenceTask = nil
+        if persistencePending, let persistValue = latestPersistValue {
+            persistencePending = false
+            onPersist?(persistValue)
+        }
+    }
+}
 
 private enum ReaderPanel: Equatable {
     case toc
@@ -32,9 +89,9 @@ struct ReaderView: View {
     @EnvironmentObject private var appModel: AppModel
 
     let book: BookSummary
-    @StateObject private var controller = ReaderController()
+    @State private var controller = ReaderController()
     @State private var sectionIndex = 0
-    @State private var progress = 0.0
+    @State private var progressState = ReaderProgressState()
     @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
     @State private var lineHeight = 1.7
@@ -66,10 +123,9 @@ struct ReaderView: View {
                 annotations: annotations,
                 controller: controller,
                 onProgress: { value in
-                    progress = value
                     let count = Double(max(book.spine.count, 1))
                     let overall = min(1, Double(sectionIndex) / count + value / count)
-                    appModel.updateProgress(bookID: book.id, fraction: overall)
+                    progressState.update(value, persistValue: overall)
                 },
                 onBoundary: moveSection,
                 onSpeakingChanged: { value in
@@ -118,7 +174,10 @@ struct ReaderView: View {
         .background(chromeBackground)
         .onAppear {
             sectionIndex = initialSectionIndex
-            progress = book.progressFraction
+            progressState.configure { fraction in
+                appModel.updateProgress(bookID: book.id, fraction: fraction)
+            }
+            progressState.setInitialValue(book.progressFraction)
             if colorScheme == .light && theme == .focus {
                 theme = .paper
             }
@@ -126,6 +185,7 @@ struct ReaderView: View {
         }
         .onDisappear {
             hideChromeTask?.cancel()
+            progressState.flush()
         }
         .onExitCommand {
             NSApp.keyWindow?.performClose(nil)
@@ -452,94 +512,23 @@ struct ReaderView: View {
     }
 
     private var readerFooter: some View {
-        HStack(spacing: 14) {
-            Button {
-                controller.send(.toggleSpeech)
-            } label: {
-                Image(systemName: isSpeaking ? "pause.fill" : "speaker.wave.2")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isSpeaking ? OBooksPalette.accent : .white.opacity(0.72))
-                    .frame(width: 24, height: 24)
+        ReaderFooter(
+            progressState: progressState,
+            isSpeaking: isSpeaking,
+            chapterLabel: chapterLabel,
+            chromeBackground: chromeBackground,
+            colorScheme: colorScheme,
+            chromeVisible: chromeVisible,
+            controller: controller,
+            onSeek: { x, width, animated in
+                seekProgress(at: x, width: width, animated: animated)
             }
-            .buttonStyle(.plain)
-            .help(isSpeaking ? "停止朗读" : "朗读当前章节")
-
-            Button {
-                controller.send(.previousPage)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("上一页")
-
-            readerProgressBar
-
-            Text(progressLabel)
-                .font(.system(size: 10).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: 34, alignment: .leading)
-
-            Text(chapterLabel)
-                .font(.system(size: 10))
-                .foregroundStyle(.white.opacity(0.42))
-                .lineLimit(1)
-
-            Button {
-                controller.send(.nextPage)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.plain)
-            .help("下一页")
-        }
-        .padding(.horizontal, 17)
-        .frame(height: 42)
-        .background(chromeBackground.opacity(colorScheme == .dark ? 0.84 : 0.94), in: Capsule())
-        .overlay {
-            Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)
-        }
-        .padding(.bottom, 10)
-        .opacity(chromeVisible ? 1 : 0)
-        .allowsHitTesting(chromeVisible)
-        .animation(.easeOut(duration: 0.18), value: chromeVisible)
+        )
     }
 
-    private var readerProgressBar: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.16))
-                Capsule()
-                    .fill(OBooksPalette.accent)
-                    .frame(width: max(0, geometry.size.width * CGFloat(min(max(progress, 0), 1))))
-            }
-            .frame(height: 4)
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .animation(.easeOut(duration: 0.18), value: progress)
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { value in
-                        seekProgress(at: value.location.x, width: geometry.size.width)
-                    }
-                    .onEnded { value in
-                        seekProgress(at: value.location.x, width: geometry.size.width)
-                    }
-            )
-            .help("跳转到章节进度")
-        }
-        .frame(width: 190, height: 18)
-    }
-
-    private func seekProgress(at x: CGFloat, width: CGFloat) {
+    private func seekProgress(at x: CGFloat, width: CGFloat, animated: Bool) {
         let normalizedX = min(max(x / max(width, 1), 0), 1)
-        controller.send(.seek(Double(normalizedX)))
+        controller.send(.seek(Double(normalizedX), animated: animated))
         keepChromeVisible()
     }
 
@@ -595,10 +584,6 @@ struct ReaderView: View {
         colorScheme == .dark ? .black : Color(nsColor: .windowBackgroundColor)
     }
 
-    private var progressLabel: String {
-        String(format: "%d%%", Int(progress * 100))
-    }
-
     private var chapterLabel: String {
         String(format: "第 %d 章", sectionIndex + 1)
     }
@@ -650,7 +635,7 @@ struct ReaderView: View {
         let next = sectionIndex + (direction > 0 ? 1 : -1)
         guard book.spine.indices.contains(next) else { return }
         sectionIndex = next
-        progress = direction > 0 ? 0 : 1
+        progressState.setInitialValue(direction > 0 ? 0 : 1)
     }
 
     private func sectionIndex(for href: String) -> Int? {
@@ -707,6 +692,113 @@ struct ReaderView: View {
         case .quiet, .calm: return Color.white.opacity(0.82)
         default: return Color.white.opacity(0.88)
         }
+    }
+}
+
+private struct ReaderFooter: View {
+    @ObservedObject var progressState: ReaderProgressState
+    let isSpeaking: Bool
+    let chapterLabel: String
+    let chromeBackground: Color
+    let colorScheme: ColorScheme
+    let chromeVisible: Bool
+    let controller: ReaderController
+    let onSeek: (CGFloat, CGFloat, Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Button {
+                controller.send(.toggleSpeech)
+            } label: {
+                Image(systemName: isSpeaking ? "pause.fill" : "speaker.wave.2")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isSpeaking ? OBooksPalette.accent : .white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help(isSpeaking ? "停止朗读" : "朗读当前章节")
+
+            Button {
+                controller.send(.previousPage)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("上一页")
+
+            progressBar
+
+            Text(progressLabel)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.55))
+                .frame(width: 34, alignment: .leading)
+
+            Text(chapterLabel)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
+
+            Button {
+                controller.send(.nextPage)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("下一页")
+        }
+        .padding(.horizontal, 17)
+        .frame(height: 42)
+        .background(chromeBackground.opacity(colorScheme == .dark ? 0.84 : 0.94), in: Capsule())
+        .overlay {
+            Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)
+        }
+        .padding(.bottom, 10)
+        .opacity(chromeVisible ? 1 : 0)
+        .allowsHitTesting(chromeVisible)
+        .animation(.easeOut(duration: 0.18), value: chromeVisible)
+    }
+
+    private var progressBar: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.16))
+                Capsule()
+                    .fill(OBooksPalette.accent)
+                    .frame(width: max(0, geometry.size.width * CGFloat(min(max(progressState.value, 0), 1))))
+            }
+            .frame(height: 4)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .animation(.linear(duration: 0.08), value: progressState.value)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { value in
+                        guard abs(value.location.x - value.startLocation.x) > 3 else { return }
+                        seek(at: value.location.x, width: geometry.size.width, animated: false)
+                    }
+                    .onEnded { value in
+                        let didDrag = abs(value.location.x - value.startLocation.x) > 3
+                        seek(at: value.location.x, width: geometry.size.width, animated: !didDrag)
+                    }
+            )
+            .help("跳转到章节进度")
+        }
+        .frame(width: 190, height: 18)
+    }
+
+    private var progressLabel: String {
+        String(format: "%d%%", Int(progressState.value * 100))
+    }
+
+    private func seek(at x: CGFloat, width: CGFloat, animated: Bool) {
+        onSeek(x, width, animated)
     }
 }
 

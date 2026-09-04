@@ -34,6 +34,14 @@ final class ReaderTextView: NSTextView {
         }
     }
 
+    override func scrollWheel(with event: NSEvent) {
+        if let scrollView = enclosingScrollView as? ReaderScrollView,
+           scrollView.handleScrollWheel(with: event) {
+            return
+        }
+        super.scrollWheel(with: event)
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)
         contextLocation = range.length > 0 ? range.location : characterLocation(for: event)
