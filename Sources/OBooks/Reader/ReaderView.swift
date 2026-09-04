@@ -227,7 +227,8 @@ struct ReaderView: View {
                 Text("\(pageNumber)")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.52))
-                    .padding(.bottom, 18)
+                    .padding(.bottom, chromeVisible ? 58 : 18)
+                    .accessibilityLabel("第 \(pageNumber) 页, 共 \(pageCount) 页")
                     .allowsHitTesting(false)
             }
         }
@@ -262,7 +263,7 @@ struct ReaderView: View {
             }
             scheduleChromeHide(after: .seconds(1.4))
         }
-        .onChange(of: flow) { newFlow in
+        .onChange(of: flow) { _, newFlow in
             UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
         }
         .onDisappear {
@@ -888,8 +889,14 @@ struct ReaderView: View {
     }
 
     private func sectionIndex(for href: String) -> Int? {
-        let path = href.split(separator: "#", maxSplits: 1).first.map(String.init) ?? href
-        return book.spine.firstIndex { $0.href == path }
+        let rawPath = href.split(separator: "#", maxSplits: 1).first.map(String.init) ?? href
+        let path = normalizedSpinePath(rawPath)
+        return book.spine.firstIndex { normalizedSpinePath($0.href) == path }
+    }
+
+    private func normalizedSpinePath(_ path: String) -> String {
+        let decoded = path.removingPercentEncoding ?? path
+        return decoded.hasPrefix("./") ? String(decoded.dropFirst(2)) : decoded
     }
 
     private struct TOCEntry: Identifiable {

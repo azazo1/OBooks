@@ -378,6 +378,10 @@ struct NativeReaderView: NSViewRepresentable {
                     )
                 }
                 textView.textStorage?.setAttributedString(attributedText)
+                textView.configurePageColumns(
+                    settings.flow.pageColumns.rawValue,
+                    viewportHeight: scrollView.contentSize.height
+                )
                 scrollView.backgroundColor = appearance.background
                 currentSectionIndex = requestedSectionIndex
                 anchors = loaded.document.anchors
@@ -677,6 +681,10 @@ struct NativeReaderView: NSViewRepresentable {
                 globalLocation = location
             }
             let clampedLocation = min(max(globalLocation, 0), length - 1)
+            if let pageOffset = textView.pageOffset(forCharacter: clampedLocation) {
+                scroll(to: pageOffset, animated: animated)
+                return
+            }
             let range = NSRange(location: clampedLocation, length: 1)
             let scroll = {
                 textView.scrollRangeToVisible(range)
@@ -860,8 +868,7 @@ struct NativeReaderView: NSViewRepresentable {
                 notifyBoundary(-1)
                 return false
             }
-            let columns = settings.flow.pageColumns.rawValue
-            let amount = max(240, clipView.bounds.height * 0.94 * CGFloat(columns))
+            let amount = pageStep(for: clipView.bounds.height)
             let next = min(maximum, max(0, current + CGFloat(direction) * amount))
             if animated {
                 animatePageTransition(direction: direction) {
@@ -871,6 +878,10 @@ struct NativeReaderView: NSViewRepresentable {
                 scroll(to: next, animated: false)
             }
             return true
+        }
+
+        private func pageStep(for viewportHeight: CGFloat) -> CGFloat {
+            return max(240, viewportHeight * 0.94)
         }
 
         private func seek(to fraction: Double, animated: Bool) {
@@ -1097,16 +1108,16 @@ struct NativeReaderView: NSViewRepresentable {
         private func reportPageInfo(offset: CGFloat, maximum: CGFloat) {
             guard settings.flow.isPaging,
                   let scrollView else { return }
-            let step = max(
-                1,
-                scrollView.contentView.bounds.height * 0.94 * CGFloat(settings.flow.pageColumns.rawValue)
-            )
+            let step = pageStep(for: scrollView.contentView.bounds.height)
             let page = max(1, Int(floor(offset / step)) + 1)
             let count = max(page, Int(ceil(maximum / step)) + 1)
             onPageInfo(page, count)
         }
 
         private func firstVisibleCharacterLocation() -> Int {
+            if let location = textView?.visibleCharacterLocation() {
+                return location
+            }
             guard let textView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return 0 }
             let origin = textView.textContainerOrigin
             var visibleRect = textView.visibleRect

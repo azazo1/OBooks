@@ -73,4 +73,22 @@ final class NativeReaderViewTests: XCTestCase {
 
         XCTAssertTrue(speakingStates.isEmpty)
     }
+
+    func testDoublePageLayoutUsesParallelTextContainers() {
+        let textView = ReaderTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        textView.isEditable = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textStorage?.setAttributedString(NSAttributedString(
+            string: String(repeating: "Double page layout text. ", count: 320),
+            attributes: [.font: NSFont.systemFont(ofSize: 18)]
+        ))
+        textView.setReadingInsets(horizontal: 56, vertical: 108)
+        textView.configurePageColumns(2, viewportHeight: 600)
+        textView.updateDocumentHeight(minimumHeight: 600)
+
+        XCTAssertGreaterThan(textView.layoutManager?.textContainers.count ?? 0, 2)
+        XCTAssertGreaterThan(textView.frame.height, 600)
+        XCTAssertEqual(textView.pageOffset(forCharacter: 0) ?? -1, 0, accuracy: 1)
+    }
 }
