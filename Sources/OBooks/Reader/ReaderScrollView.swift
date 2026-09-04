@@ -4,13 +4,41 @@ import QuartzCore
 @MainActor
 final class ReaderScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
-    var pageTurn: ((Int) -> Void)?
+    var pageTurn: ((Int, Bool) -> Bool)?
     var pageFlow: ReaderFlowMode = .scrolling(scope: .chapter)
     private var scrollTargetY: CGFloat?
     private var refreshLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
     private var pageTurnInFlight = false
+    private var interactivePage: InteractivePageTransition?
+    private var suppressMomentum = false
     private let responseDuration: CFTimeInterval = 0.12
+
+    private final class InteractivePageTransition: @unchecked Sendable {
+        let oldView: NSImageView
+        let newView: NSImageView
+        let restingFrame: NSRect
+        let startOffset: CGFloat
+        let direction: Int
+        let orientation: ReaderPageOrientation
+        var translation: CGFloat = 0
+
+        init(
+            oldView: NSImageView,
+            newView: NSImageView,
+            restingFrame: NSRect,
+            startOffset: CGFloat,
+            direction: Int,
+            orientation: ReaderPageOrientation
+        ) {
+            self.oldView = oldView
+            self.newView = newView
+            self.restingFrame = restingFrame
+            self.startOffset = startOffset
+            self.direction = direction
+            self.orientation = orientation
+        }
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -90,16 +118,41 @@ final class ReaderScrollView: NSScrollView {
     @discardableResult
     func handlePageScroll(with event: NSEvent) -> Bool {
         guard pageFlow.isPaging else { return false }
-        let delta: CGFloat
-        switch pageFlow.pageOrientation {
-        case .horizontal:
-            delta = event.scrollingDeltaX != 0 ? CGFloat(event.scrollingDeltaX) : CGFloat(event.scrollingDeltaY)
-        case .vertical, .none:
-            delta = CGFloat(event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX)
+        if suppressMomentum {
+            if event.phase == .began || event.momentumPhase == .ended {
+                suppressMomentum = false
+            } else {
+                return true
+            }
         }
+
+        let orientation = pageFlow.pageOrientation ?? .vertical
+        let precise = event.hasPreciseScrollingDeltas
+        let delta = pageAxisDelta(event, orientation: orientation, precise: precise)
+        let isEnding = event.phase == .ended || event.phase == .cancelled
+        if precise {
+            if let interactivePage {
+                if isEnding {
+                    finishInteractivePage(interactivePage)
+                } else if abs(delta) > 0.01 {
+                    updateInteractivePage(interactivePage, delta: delta)
+                }
+                return true
+            }
+            guard !isEnding, abs(delta) > 0.01 else { return true }
+            let direction = delta > 0 ? -1 : 1
+            guard beginInteractivePage(direction: direction, orientation: orientation) else {
+                return true
+            }
+            if let interactivePage {
+                updateInteractivePage(interactivePage, delta: delta)
+            }
+            return true
+        }
+
         guard abs(delta) > 0.01, !pageTurnInFlight else { return true }
         pageTurnInFlight = true
-        pageTurn?(delta > 0 ? -1 : 1)
+        _ = pageTurn?(delta > 0 ? -1 : 1, true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.pageTurnInFlight = false
         }
@@ -154,6 +207,191 @@ final class ReaderScrollView: NSScrollView {
         let image = NSImage(size: bounds.size)
         image.addRepresentation(representation)
         return image
+    }
+
+    private func pageAxisDelta(
+        _ event: NSEvent,
+        orientation: ReaderPageOrientation,
+        precise: Bool
+    ) -> CGFloat {
+        switch orientation {
+        case .horizontal:
+            if precise {
+                return CGFloat(event.scrollingDeltaX)
+            }
+            return CGFloat(event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY)
+        case .vertical:
+            if precise {
+                return CGFloat(event.scrollingDeltaY)
+            }
+            return CGFloat(event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX)
+        }
+    }
+
+    private func beginInteractivePage(
+        direction: Int,
+        orientation: ReaderPageOrientation
+    ) -> Bool {
+        guard interactivePage == nil,
+              let before = snapshotImage(),
+              let startOffset = documentScrollOffset,
+              pageTurn?(direction, false) == true else {
+            return false
+        }
+        displayIfNeeded()
+        contentView.displayIfNeeded()
+        documentView?.displayIfNeeded()
+        guard let after = snapshotImage() else {
+            scroll(to: startOffset, animated: false)
+            return false
+        }
+
+        let oldView = transitionImageView(image: before)
+        let newView = transitionImageView(image: after)
+        let restingFrame = bounds
+        oldView.frame = restingFrame
+        newView.frame = incomingFrame(
+            from: restingFrame,
+            orientation: orientation,
+            direction: direction
+        )
+        configureIncomingView(newView, orientation: orientation, direction: direction)
+        addSubview(oldView)
+        addSubview(newView)
+        let transition = InteractivePageTransition(
+            oldView: oldView,
+            newView: newView,
+            restingFrame: restingFrame,
+            startOffset: startOffset,
+            direction: direction,
+            orientation: orientation
+        )
+        interactivePage = transition
+        applyInteractivePage(transition, progress: 0)
+        return true
+    }
+
+    private func updateInteractivePage(
+        _ transition: InteractivePageTransition,
+        delta: CGFloat
+    ) {
+        guard interactivePage === transition else { return }
+        let proposed = transition.translation + delta
+        transition.translation = transition.direction > 0
+            ? min(0, proposed)
+            : max(0, proposed)
+        let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
+        let threshold = max(96, extent * 0.32)
+        let progress = min(1, abs(transition.translation) / threshold)
+        applyInteractivePage(transition, progress: progress)
+    }
+
+    private func finishInteractivePage(_ transition: InteractivePageTransition) {
+        guard interactivePage === transition else { return }
+        interactivePage = nil
+        let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
+        let threshold = max(96, extent * 0.32)
+        let shouldCommit = abs(transition.translation) >= threshold * 0.72
+        let targetProgress = CGFloat(shouldCommit ? 1 : 0)
+        let targetTranslation = shouldCommit
+            ? -CGFloat(transition.direction) * threshold
+            : 0
+        let touchOffset = transition.orientation == .horizontal
+            ? targetTranslation
+            : -targetTranslation
+        var oldFrame = transition.restingFrame
+        let inset = transition.restingFrame.width * 0.008 * targetProgress
+        let verticalInset = transition.restingFrame.height * 0.008 * targetProgress
+        oldFrame = oldFrame.insetBy(dx: inset, dy: verticalInset)
+        if transition.orientation == .horizontal {
+            oldFrame.origin.x += touchOffset * 0.1
+        } else {
+            oldFrame.origin.y += touchOffset * 0.1
+        }
+        var newFrame = transition.restingFrame
+        switch transition.orientation {
+        case .horizontal:
+            newFrame.origin.x += CGFloat(transition.direction) * extent + touchOffset
+        case .vertical:
+            newFrame.origin.y -= CGFloat(transition.direction) * extent - touchOffset
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = shouldCommit ? 0.2 : 0.24
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            transition.oldView.animator().frame = oldFrame
+            transition.oldView.animator().alphaValue = shouldCommit ? 0.56 : 1
+            transition.newView.animator().frame = shouldCommit
+                ? transition.restingFrame
+                : incomingFrame(
+                    from: transition.restingFrame,
+                    orientation: transition.orientation,
+                    direction: transition.direction
+                )
+        } completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                transition.oldView.removeFromSuperview()
+                transition.newView.removeFromSuperview()
+                if !shouldCommit {
+                    self.scroll(to: transition.startOffset, animated: false)
+                }
+                self.suppressMomentum = true
+            }
+        }
+    }
+
+    private func applyInteractivePage(
+        _ transition: InteractivePageTransition,
+        progress: CGFloat
+    ) {
+        let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
+        let touchOffset = transition.orientation == .horizontal
+            ? transition.translation
+            : -transition.translation
+        var oldFrame = transition.restingFrame
+        oldFrame = oldFrame.insetBy(
+            dx: transition.restingFrame.width * 0.008 * progress,
+            dy: transition.restingFrame.height * 0.008 * progress
+        )
+        if transition.orientation == .horizontal {
+            oldFrame.origin.x += touchOffset * 0.1
+        } else {
+            oldFrame.origin.y += touchOffset * 0.1
+        }
+        var newFrame = transition.restingFrame
+        switch transition.orientation {
+        case .horizontal:
+            newFrame.origin.x += CGFloat(transition.direction) * extent + touchOffset
+        case .vertical:
+            newFrame.origin.y -= CGFloat(transition.direction) * extent - touchOffset
+        }
+        transition.oldView.frame = oldFrame
+        transition.oldView.alphaValue = 1 - progress * 0.44
+        transition.newView.frame = newFrame
+    }
+
+    private func configureIncomingView(
+        _ imageView: NSImageView,
+        orientation: ReaderPageOrientation,
+        direction: Int
+    ) {
+        imageView.layer?.shadowColor = NSColor.black.cgColor
+        imageView.layer?.shadowOpacity = 0.32
+        imageView.layer?.shadowRadius = 15
+        imageView.layer?.shadowOffset = shadowOffset(
+            orientation: orientation,
+            direction: direction
+        )
+    }
+
+    private func pageExtent(for orientation: ReaderPageOrientation, frame: NSRect) -> CGFloat {
+        orientation == .horizontal ? frame.width : frame.height
+    }
+
+    private var documentScrollOffset: CGFloat? {
+        guard let documentView else { return nil }
+        let maximum = max(0, documentView.frame.height - contentView.bounds.height)
+        return min(max(contentView.bounds.origin.y, 0), maximum)
     }
 
     private func transitionImageView(image: NSImage) -> NSImageView {

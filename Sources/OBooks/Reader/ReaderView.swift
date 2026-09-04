@@ -73,6 +73,7 @@ private enum ReaderPanel: Equatable {
     case highlights
     case search
     case settings
+    case flow
 
     var title: String {
         switch self {
@@ -81,13 +82,14 @@ private enum ReaderPanel: Equatable {
         case .highlights: return "高亮标记和笔记"
         case .search: return "搜索"
         case .settings: return "主题与设置"
+        case .flow: return "浏览模式"
         }
     }
 
     var isLeading: Bool {
         switch self {
         case .toc, .bookmarks: return true
-        case .highlights, .search, .settings: return false
+        case .highlights, .search, .settings, .flow: return false
         }
     }
 }
@@ -110,6 +112,8 @@ struct ReaderView: View {
     @State private var lineHeight = 1.7
     @State private var margin = 56.0
     @State private var flow: ReaderFlowMode = .scrolling(scope: .chapter)
+    @State private var pageNumber = 1
+    @State private var pageCount = 1
     @State private var activePanel: ReaderPanel?
     @State private var isBookmarked = false
     @State private var searchQuery = ""
@@ -127,6 +131,11 @@ struct ReaderView: View {
         self.book = book
         let initialSectionIndex = Self.initialSectionIndex(for: book)
         _sectionIndex = State(initialValue: initialSectionIndex)
+        _flow = State(
+            initialValue: ReaderFlowMode(
+                preferenceValue: UserDefaults.standard.string(forKey: "reader.browsingMode") ?? ""
+            ) ?? .scrolling(scope: .chapter)
+        )
         _pendingPosition = State(initialValue: Self.initialReadingPosition(for: book))
         _currentPosition = State(
             initialValue: Self.initialReadingPosition(for: book)
@@ -165,6 +174,10 @@ struct ReaderView: View {
                     }
                     let displayValue = flow.scrollScope == .chapter && !flow.isPaging ? value : overall
                     progressState.update(displayValue, persistValue: overall, position: position)
+                },
+                onPageInfo: { number, count in
+                    pageNumber = number
+                    pageCount = count
                 },
                 onBoundary: moveSection,
                 onSpeakingChanged: { value in
@@ -209,6 +222,15 @@ struct ReaderView: View {
         .overlay(alignment: .bottom) {
             readerFooter
         }
+        .overlay(alignment: .bottom) {
+            if flow.isPaging {
+                Text("\(pageNumber)")
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.52))
+                    .padding(.bottom, 18)
+                    .allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .bottomLeading) {
             if jumpBackPosition != nil {
                 jumpBackButton
@@ -240,6 +262,9 @@ struct ReaderView: View {
             }
             scheduleChromeHide(after: .seconds(1.4))
         }
+        .onChange(of: flow) { newFlow in
+            UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
+        }
         .onDisappear {
             hideChromeTask?.cancel()
             progressState.flush()
@@ -269,6 +294,7 @@ struct ReaderView: View {
 
             HStack(spacing: 15) {
                 readerButton(label: "大", help: "打开阅读设置", panel: .settings)
+                readerButton(systemName: "book.pages", help: "打开浏览模式", panel: .flow)
                 readerButton(systemName: "magnifyingglass", help: "搜索书籍", panel: .search)
                 Button {
                     isBookmarked.toggle()
@@ -354,6 +380,10 @@ struct ReaderView: View {
         case .settings:
             ReaderPanelSurface(title: panel.title, width: 306) {
                 settingsContent
+            }
+        case .flow:
+            ReaderPanelSurface(title: panel.title, width: 286) {
+                flowControls
             }
         }
     }
@@ -500,8 +530,6 @@ struct ReaderView: View {
 
     private var settingsContent: some View {
         VStack(alignment: .leading, spacing: 16) {
-            flowControls
-
             HStack(spacing: 0) {
                 sizeButton(title: "小", value: 16)
                 Rectangle().fill(Color.white.opacity(0.22)).frame(width: 1, height: 16)

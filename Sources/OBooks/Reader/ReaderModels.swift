@@ -87,6 +87,33 @@ enum ReaderFlowMode: Equatable {
         if case .paging(_, let columns) = self { return columns }
         return .single
     }
+
+    var preferenceValue: String {
+        switch self {
+        case .scrolling(let scope):
+            return "scrolling.\(scope.rawValue)"
+        case .paging(let orientation, let columns):
+            return "paging.\(orientation.rawValue).\(columns.rawValue)"
+        }
+    }
+
+    init?(preferenceValue: String) {
+        let parts = preferenceValue.split(separator: ".")
+        guard let mode = parts.first else { return nil }
+        switch mode {
+        case "scrolling":
+            guard parts.count == 2, let scope = ReaderScrollScope(rawValue: String(parts[1])) else { return nil }
+            self = .scrolling(scope: scope)
+        case "paging":
+            guard parts.count == 3,
+                  let orientation = ReaderPageOrientation(rawValue: String(parts[1])),
+                  let rawColumns = Int(parts[2]),
+                  let columns = ReaderPageColumns(rawValue: rawColumns) else { return nil }
+            self = .paging(orientation: orientation, columns: columns)
+        default:
+            return nil
+        }
+    }
 }
 
 struct ReadingPosition: Codable, Hashable, Sendable {
