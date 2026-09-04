@@ -166,7 +166,7 @@ struct ReaderView: View {
                     let currentIndex =
                         book.spine.firstIndex { spineIdentity($0) == position.spineID }
                         ?? sectionIndex
-                    let overall = flow.scrollScope == .book
+                    let overall = flow.scrollScope == .book || flow.isPaging
                         ? min(1, max(0, value))
                         : min(1, Double(currentIndex) / count + value / count)
                     if flow.scrollScope == .book || flow.isPaging {

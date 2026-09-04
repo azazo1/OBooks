@@ -87,7 +87,23 @@ final class NativeReaderViewTests: XCTestCase {
         textView.configurePageColumns(2, viewportHeight: 600)
         textView.updateDocumentHeight(minimumHeight: 600)
 
-        XCTAssertGreaterThan(textView.layoutManager?.textContainers.count ?? 0, 2)
+        let containers = textView.layoutManager?.textContainers ?? []
+        XCTAssertGreaterThan(containers.count, 2)
+        if let layoutManager = textView.layoutManager {
+            for container in containers.prefix(2) {
+                XCTAssertGreaterThan(layoutManager.glyphRange(for: container).length, 0)
+            }
+            let firstRange = layoutManager.characterRange(
+                forGlyphRange: layoutManager.glyphRange(for: containers[0]),
+                actualGlyphRange: nil
+            )
+            let secondRange = layoutManager.characterRange(
+                forGlyphRange: layoutManager.glyphRange(for: containers[1]),
+                actualGlyphRange: nil
+            )
+            XCTAssertLessThan(firstRange.location, secondRange.location)
+            XCTAssertEqual(textView.pageOffset(forCharacter: secondRange.location) ?? -1, 0, accuracy: 1)
+        }
         XCTAssertGreaterThan(textView.frame.height, 600)
         XCTAssertEqual(textView.pageOffset(forCharacter: 0) ?? -1, 0, accuracy: 1)
     }

@@ -5,13 +5,16 @@ import QuartzCore
 final class ReaderScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
     var pageTurn: ((Int, Bool) -> Bool)?
+    var pageTurnRollbackOffset: CGFloat?
     var pageFlow: ReaderFlowMode = .scrolling(scope: .chapter)
     private var scrollTargetY: CGFloat?
     private var refreshLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
     private var pageTurnInFlight = false
     private var interactivePage: InteractivePageTransition?
-    private var suppressMomentum = false
+    private var interactivePageSettling = false
+    private var preciseGestureActive = false
+    private var precisePageAttempted = false
     private let responseDuration: CFTimeInterval = 0.12
 
     private final class InteractivePageTransition: @unchecked Sendable {
@@ -118,28 +121,44 @@ final class ReaderScrollView: NSScrollView {
     @discardableResult
     func handlePageScroll(with event: NSEvent) -> Bool {
         guard pageFlow.isPaging else { return false }
-        if suppressMomentum {
-            if event.phase == .began || event.momentumPhase == .ended {
-                suppressMomentum = false
-            } else {
-                return true
-            }
-        }
-
         let orientation = pageFlow.pageOrientation ?? .vertical
         let precise = event.hasPreciseScrollingDeltas
         let delta = pageAxisDelta(event, orientation: orientation, precise: precise)
         let isEnding = event.phase == .ended || event.phase == .cancelled
         if precise {
+            if event.phase == .began {
+                preciseGestureActive = true
+                precisePageAttempted = false
+            } else if !preciseGestureActive,
+                      event.phase == .changed,
+                      event.momentumPhase.isEmpty {
+                preciseGestureActive = true
+                precisePageAttempted = false
+            }
+
+            guard preciseGestureActive else { return true }
+            if interactivePageSettling {
+                precisePageAttempted = true
+                if isEnding {
+                    preciseGestureActive = false
+                }
+                return true
+            }
             if let interactivePage {
                 if isEnding {
                     finishInteractivePage(interactivePage)
+                    preciseGestureActive = false
                 } else if abs(delta) > 0.01 {
                     updateInteractivePage(interactivePage, delta: delta)
                 }
                 return true
             }
-            guard !isEnding, abs(delta) > 0.01 else { return true }
+            if isEnding {
+                preciseGestureActive = false
+                return true
+            }
+            guard !precisePageAttempted, abs(delta) > 0.01 else { return true }
+            precisePageAttempted = true
             let direction = delta > 0 ? -1 : 1
             guard beginInteractivePage(direction: direction, orientation: orientation) else {
                 return true
@@ -234,15 +253,20 @@ final class ReaderScrollView: NSScrollView {
     ) -> Bool {
         guard interactivePage == nil,
               let before = snapshotImage(),
-              let startOffset = documentScrollOffset,
-              pageTurn?(direction, false) == true else {
+              let startOffset = documentScrollOffset else {
             return false
         }
+        pageTurnRollbackOffset = startOffset
+        guard pageTurn?(direction, false) == true else {
+            pageTurnRollbackOffset = nil
+            return false
+        }
+        let rollbackOffset = pageTurnRollbackOffset ?? startOffset
         displayIfNeeded()
         contentView.displayIfNeeded()
         documentView?.displayIfNeeded()
         guard let after = snapshotImage() else {
-            scroll(to: startOffset, animated: false)
+            scroll(to: rollbackOffset, animated: false)
             return false
         }
 
@@ -262,7 +286,7 @@ final class ReaderScrollView: NSScrollView {
             oldView: oldView,
             newView: newView,
             restingFrame: restingFrame,
-            startOffset: startOffset,
+            startOffset: rollbackOffset,
             direction: direction,
             orientation: orientation
         )
@@ -277,10 +301,10 @@ final class ReaderScrollView: NSScrollView {
     ) {
         guard interactivePage === transition else { return }
         let proposed = transition.translation + delta
-        transition.translation = transition.direction > 0
-            ? min(0, proposed)
-            : max(0, proposed)
         let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
+        transition.translation = transition.direction > 0
+            ? min(0, max(-extent, proposed))
+            : max(0, min(extent, proposed))
         let threshold = max(96, extent * 0.32)
         let progress = min(1, abs(transition.translation) / threshold)
         applyInteractivePage(transition, progress: progress)
@@ -289,6 +313,7 @@ final class ReaderScrollView: NSScrollView {
     private func finishInteractivePage(_ transition: InteractivePageTransition) {
         guard interactivePage === transition else { return }
         interactivePage = nil
+        interactivePageSettling = true
         let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
         let threshold = max(96, extent * 0.32)
         let shouldCommit = abs(transition.translation) >= threshold * 0.72
@@ -335,7 +360,8 @@ final class ReaderScrollView: NSScrollView {
                 if !shouldCommit {
                     self.scroll(to: transition.startOffset, animated: false)
                 }
-                self.suppressMomentum = true
+                self.pageTurnRollbackOffset = nil
+                self.interactivePageSettling = false
             }
         }
     }

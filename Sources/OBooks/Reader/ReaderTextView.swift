@@ -15,6 +15,8 @@ final class ReaderTextView: NSTextView {
     private var pageViewportHeight: CGFloat = 0
     private var pageColumnFrames: [NSRect] = []
     private var isUpdatingPageLayout = false
+    private var selectionAnchorLocation: Int?
+    private var isSelectingAcrossColumns = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -70,8 +72,8 @@ final class ReaderTextView: NSTextView {
         guard pageColumns > 1,
               let layoutManager,
               !pageColumnFrames.isEmpty else { return nil }
-        layoutManager.ensureLayout(for: layoutManager.textContainers.last!)
         for (index, container) in layoutManager.textContainers.enumerated() {
+            layoutManager.ensureLayout(for: container)
             let glyphRange = layoutManager.glyphRange(for: container)
             guard glyphRange.length > 0, glyphRange.location != NSNotFound else { continue }
             let characterRange = layoutManager.characterRange(
@@ -102,6 +104,7 @@ final class ReaderTextView: NSTextView {
         var firstLocation: Int?
         for (index, container) in layoutManager.textContainers.enumerated() {
             guard pageColumnFrames.indices.contains(index) else { break }
+            layoutManager.ensureLayout(for: container)
             let frame = pageColumnFrames[index]
             let intersection = visibleRect.intersection(frame)
             guard !intersection.isEmpty else { continue }
@@ -123,9 +126,16 @@ final class ReaderTextView: NSTextView {
             let frame = pageColumnFrames[index]
             guard frame.intersects(dirtyRect) else { continue }
             let container = layoutManager.textContainers[index]
+            layoutManager.ensureLayout(for: container)
             let glyphRange = layoutManager.glyphRange(for: container)
             guard glyphRange.length > 0, glyphRange.location != NSNotFound else { continue }
             layoutManager.drawBackground(forGlyphRange: glyphRange, at: frame.origin)
+            drawSelectionBackground(
+                forGlyphRange: glyphRange,
+                in: container,
+                at: frame.origin,
+                layoutManager: layoutManager
+            )
             layoutManager.drawGlyphs(forGlyphRange: glyphRange, at: frame.origin)
         }
     }
@@ -148,7 +158,49 @@ final class ReaderTextView: NSTextView {
             onLink?(link)
             return
         }
-        super.mouseDown(with: event)
+        guard pageColumns > 1,
+              event.clickCount == 1,
+              event.type == .leftMouseDown else {
+            super.mouseDown(with: event)
+            return
+        }
+        let location = characterLocation(for: event)
+        selectionAnchorLocation = location
+        isSelectingAcrossColumns = true
+        window?.makeFirstResponder(self)
+        updateCrossColumnSelection(NSRange(location: location, length: 0))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard pageColumns > 1,
+              isSelectingAcrossColumns,
+              let anchor = selectionAnchorLocation else {
+            super.mouseDragged(with: event)
+            return
+        }
+        let location = characterLocation(for: event)
+        let range = NSRange(
+            location: min(anchor, location),
+            length: abs(location - anchor)
+        )
+        updateCrossColumnSelection(range)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pageColumns > 1,
+              isSelectingAcrossColumns else {
+            super.mouseUp(with: event)
+            return
+        }
+        let location = characterLocation(for: event)
+        if let anchor = selectionAnchorLocation {
+            updateCrossColumnSelection(NSRange(
+                location: min(anchor, location),
+                length: abs(location - anchor)
+            ))
+        }
+        selectionAnchorLocation = nil
+        isSelectingAcrossColumns = false
     }
 
     override func resetCursorRects() {
@@ -301,6 +353,14 @@ final class ReaderTextView: NSTextView {
         }
     }
 
+    private func updateCrossColumnSelection(_ range: NSRange) {
+        let length = (string as NSString).length
+        let clampedLocation = min(max(range.location, 0), length)
+        let clampedLength = min(max(range.length, 0), length - clampedLocation)
+        setSelectedRange(NSRange(location: clampedLocation, length: clampedLength))
+        needsDisplay = true
+    }
+
     private func updatePageLayout(minimumHeight: CGFloat) {
         guard !isUpdatingPageLayout,
               pageColumns > 1,
@@ -339,7 +399,32 @@ final class ReaderTextView: NSTextView {
             layoutManager.addTextContainer(container)
         }
 
-        pageColumnFrames = (0..<containerCount).map { index in
+        for container in layoutManager.textContainers {
+            layoutManager.ensureLayout(for: container)
+        }
+        while let lastContainer = layoutManager.textContainers.last {
+            let lastRange = layoutManager.glyphRange(for: lastContainer)
+            let hasMoreGlyphs = lastRange.location != NSNotFound
+                && NSMaxRange(lastRange) < layoutManager.numberOfGlyphs
+            if hasMoreGlyphs {
+                for _ in 0..<2 {
+                    let container = NSTextContainer(size: NSSize(width: columnWidth, height: columnHeight))
+                    container.lineFragmentPadding = 0
+                    layoutManager.addTextContainer(container)
+                    layoutManager.ensureLayout(for: container)
+                }
+                continue
+            }
+            if layoutManager.textContainers.count > 2, lastRange.length == 0 {
+                layoutManager.removeTextContainer(at: layoutManager.textContainers.count - 1)
+                continue
+            }
+            break
+        }
+
+        let finalPageCount = max(1, Int(ceil(Double(layoutManager.textContainers.count) / 2)))
+
+        pageColumnFrames = (0..<layoutManager.textContainers.count).map { index in
             let row = index / 2
             let column = index % 2
             return NSRect(
@@ -351,13 +436,50 @@ final class ReaderTextView: NSTextView {
         }
         let documentHeight = max(
             viewportHeight,
-            CGFloat(pageCount) * viewportHeight + verticalInset * 2
+            CGFloat(finalPageCount) * viewportHeight + verticalInset * 2
         )
         if abs(frame.height - documentHeight) > 0.5 {
             super.setFrameSize(NSSize(width: frame.width, height: documentHeight))
         }
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
+    }
+
+    private func drawSelectionBackground(
+        forGlyphRange glyphRange: NSRange,
+        in textContainer: NSTextContainer,
+        at origin: NSPoint,
+        layoutManager: NSLayoutManager
+    ) {
+        let selection = selectedRange()
+        guard selection.length > 0 else { return }
+        let selectedGlyphRange = layoutManager.glyphRange(
+            forCharacterRange: selection,
+            actualCharacterRange: nil
+        )
+        guard selectedGlyphRange.length > 0 else { return }
+        let intersection = NSIntersectionRange(glyphRange, selectedGlyphRange)
+        guard intersection.length > 0 else { return }
+        let color = selectedTextAttributes[.backgroundColor] as? NSColor
+            ?? NSColor.selectedTextBackgroundColor
+        color.setFill()
+        layoutManager.enumerateLineFragments(forGlyphRange: intersection) {
+            _, usedRect, container, lineGlyphRange, _ in
+            guard container === textContainer else { return }
+            let lineIntersection = NSIntersectionRange(lineGlyphRange, intersection)
+            guard lineIntersection.length > 0 else { return }
+            var rect = usedRect
+            let glyphRect = layoutManager.boundingRect(
+                forGlyphRange: lineIntersection,
+                in: textContainer
+            )
+            if !glyphRect.isEmpty {
+                rect.origin.x = glyphRect.minX
+                rect.size.width = glyphRect.width
+            }
+            rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+            NSBezierPath(rect: rect).fill()
+        }
     }
 
     private func removeAdditionalTextContainers() {
@@ -384,21 +506,75 @@ final class ReaderTextView: NSTextView {
             return selectedRange().location
         }
         let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let containerGlyphRange = layoutManager.glyphRange(for: textContainer)
+        guard containerGlyphRange.length > 0 else {
+            return characterBoundary(for: textContainer, layoutManager: layoutManager)
+        }
         let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
-        guard glyphIndex < layoutManager.numberOfGlyphs else { return (string as NSString).length }
-        return layoutManager.characterIndexForGlyph(at: glyphIndex)
+        if glyphIndex >= NSMaxRange(containerGlyphRange) {
+            return NSMaxRange(layoutManager.characterRange(
+                forGlyphRange: containerGlyphRange,
+                actualGlyphRange: nil
+            ))
+        }
+        return layoutManager.characterIndexForGlyph(
+            at: max(containerGlyphRange.location, glyphIndex)
+        )
+    }
+
+    private func characterBoundary(
+        for textContainer: NSTextContainer,
+        layoutManager: NSLayoutManager
+    ) -> Int {
+        guard let index = layoutManager.textContainers.firstIndex(where: { $0 === textContainer }) else {
+            return (string as NSString).length
+        }
+        for previousIndex in stride(from: index - 1, through: 0, by: -1) {
+            let glyphRange = layoutManager.glyphRange(for: layoutManager.textContainers[previousIndex])
+            guard glyphRange.length > 0, glyphRange.location != NSNotFound else { continue }
+            return NSMaxRange(layoutManager.characterRange(
+                forGlyphRange: glyphRange,
+                actualGlyphRange: nil
+            ))
+        }
+        return 0
     }
 
     private func textContainerContext(at point: NSPoint) -> (NSTextContainer, NSPoint)? {
         guard let layoutManager else { return nil }
         if pageColumns > 1 {
-            for (index, frame) in pageColumnFrames.enumerated() where frame.contains(point) {
-                guard layoutManager.textContainers.indices.contains(index) else { continue }
+            if let (index, frame) = pageColumnFrames.enumerated().first(where: { $0.element.contains(point) }),
+               layoutManager.textContainers.indices.contains(index) {
+                return (layoutManager.textContainers[index], frame.origin)
+            }
+            if let (index, frame) = pageColumnFrames.enumerated().min(by: {
+                distance(from: point, to: $0.element) < distance(from: point, to: $1.element)
+            }), layoutManager.textContainers.indices.contains(index) {
                 return (layoutManager.textContainers[index], frame.origin)
             }
         }
         guard let textContainer else { return nil }
         return (textContainer, textContainerOrigin)
+    }
+
+    private func distance(from point: NSPoint, to rect: NSRect) -> CGFloat {
+        let dx: CGFloat
+        if point.x < rect.minX {
+            dx = rect.minX - point.x
+        } else if point.x > rect.maxX {
+            dx = point.x - rect.maxX
+        } else {
+            dx = 0
+        }
+        let dy: CGFloat
+        if point.y < rect.minY {
+            dy = rect.minY - point.y
+        } else if point.y > rect.maxY {
+            dy = point.y - rect.maxY
+        } else {
+            dy = 0
+        }
+        return hypot(dx, dy)
     }
 
     private func menuItem(title: String, symbol: String, action: Selector) -> NSMenuItem {
