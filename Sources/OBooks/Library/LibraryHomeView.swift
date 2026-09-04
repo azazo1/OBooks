@@ -196,19 +196,33 @@ private struct ContinueBookCard: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.92))
                             .lineLimit(2)
+                            .frame(height: 32, alignment: .center)
                         Text(book.authorLabel)
                             .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.58))
                             .lineLimit(1)
-                        HStack(spacing: 7) {
-                            ProgressView(value: book.progressFraction)
-                                .progressViewStyle(.linear)
-                                .tint(OBooksPalette.accent)
-                                .frame(width: 86)
-                            Text("\(Int(book.progressFraction * 100))%")
-                                .font(.system(size: 10).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.58))
+                        Group {
+                            if book.isFinished {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(OBooksPalette.secondaryText)
+                                    Text("已读完")
+                                        .foregroundStyle(OBooksPalette.secondaryText)
+                                }
+                                .font(.system(size: 10, weight: .semibold))
+                            } else {
+                                HStack(spacing: 7) {
+                                    ProgressView(value: book.progressFraction)
+                                        .progressViewStyle(.linear)
+                                        .tint(OBooksPalette.accent)
+                                        .frame(width: 86)
+                                    Text("\(Int(book.progressFraction * 100))%")
+                                        .font(.system(size: 10).monospacedDigit())
+                                        .foregroundStyle(.white.opacity(0.58))
+                                }
+                            }
                         }
+                        .frame(height: 16, alignment: .leading)
                     }
                     Spacer(minLength: 4)
                 }
