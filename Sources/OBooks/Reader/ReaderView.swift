@@ -1,6 +1,6 @@
-import Foundation
 import AppKit
 import Combine
+import Foundation
 import SwiftUI
 
 @MainActor
@@ -45,7 +45,8 @@ private final class ReaderProgressState: ObservableObject {
                 self.persistencePending = false
                 self.persistenceTask = nil
                 if let persistValue = self.latestPersistValue,
-                   let position = self.latestPersistPosition {
+                    let position = self.latestPersistPosition
+                {
                     self.onPersist?(persistValue, position)
                 }
                 return
@@ -57,8 +58,9 @@ private final class ReaderProgressState: ObservableObject {
         persistenceTask?.cancel()
         persistenceTask = nil
         if persistencePending,
-           let persistValue = latestPersistValue,
-           let position = latestPersistPosition {
+            let persistValue = latestPersistValue,
+            let position = latestPersistPosition
+        {
             persistencePending = false
             onPersist?(persistValue, position)
         }
@@ -134,8 +136,10 @@ struct ReaderView: View {
                 controller: controller,
                 onProgress: { value, position in
                     let count = Double(max(book.spine.count, 1))
-                    let currentIndex = book.spine.firstIndex { spineIdentity($0) == position.spineID } ?? sectionIndex
-                     let overall = min(1, Double(currentIndex) / count + value / count)
+                    let currentIndex =
+                        book.spine.firstIndex { spineIdentity($0) == position.spineID }
+                        ?? sectionIndex
+                    let overall = min(1, Double(currentIndex) / count + value / count)
                     progressState.update(value, persistValue: overall, position: position)
                 },
                 onBoundary: moveSection,
@@ -145,7 +149,8 @@ struct ReaderView: View {
                 onAnnotation: { text, kind, range in
                     guard !text.isEmpty else { return }
                     annotations.insert(
-                        ReaderAnnotation(text: text, kind: kind, sectionIndex: sectionIndex, range: range),
+                        ReaderAnnotation(
+                            text: text, kind: kind, sectionIndex: sectionIndex, range: range),
                         at: 0
                     )
                 },
@@ -161,10 +166,10 @@ struct ReaderView: View {
                 },
                 onAnchorConsumed: {
                     pendingAnchor = nil
-                     pendingPosition = nil
-                 },
-                 onPositionConsumed: {
-                     pendingPosition = nil
+                    pendingPosition = nil
+                },
+                onPositionConsumed: {
+                    pendingPosition = nil
                 }
             )
 
@@ -249,7 +254,7 @@ struct ReaderView: View {
             .frame(width: 136, alignment: .trailing)
         }
         .padding(.leading, 82)
-         .padding(.trailing, 22)
+        .padding(.trailing, 22)
         .frame(height: 52)
         .background(chromeBackground.opacity(colorScheme == .dark ? 0.92 : 0.96))
         .overlay(alignment: .bottom) {
@@ -292,7 +297,9 @@ struct ReaderView: View {
     private func panelView(_ panel: ReaderPanel) -> some View {
         panelContent(panel)
             .padding(.top, 52)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panel.isLeading ? .topLeading : .topTrailing)
+            .frame(
+                maxWidth: .infinity, maxHeight: .infinity,
+                alignment: panel.isLeading ? .topLeading : .topTrailing)
     }
 
     @ViewBuilder
@@ -386,9 +393,12 @@ struct ReaderView: View {
                 } else {
                     ForEach(annotations) { annotation in
                         VStack(alignment: .leading, spacing: 6) {
-                            Label(annotation.kind == "note" ? "笔记" : "高亮", systemImage: annotation.kind == "note" ? "note.text" : "highlighter")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(OBooksPalette.accent)
+                            Label(
+                                annotation.kind == "note" ? "笔记" : "高亮",
+                                systemImage: annotation.kind == "note" ? "note.text" : "highlighter"
+                            )
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(OBooksPalette.accent)
                             Text(annotation.text)
                                 .font(.system(size: 12))
                                 .foregroundStyle(.white.opacity(0.78))
@@ -396,7 +406,8 @@ struct ReaderView: View {
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                        .background(
+                            Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
                     }
                 }
             }
@@ -467,7 +478,12 @@ struct ReaderView: View {
             .frame(height: 27)
             .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10),
+                    GridItem(.flexible(), spacing: 10),
+                ], spacing: 10
+            ) {
                 ForEach(ReadingTheme.allCases) { item in
                     themeButton(item)
                 }
@@ -502,7 +518,9 @@ struct ReaderView: View {
                 .foregroundStyle(abs(fontSize - value) < 0.1 ? .white : OBooksPalette.secondaryText)
                 .frame(maxWidth: .infinity)
                 .frame(height: 27)
-                .background(abs(fontSize - value) < 0.1 ? Color.white.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .background(
+                    abs(fontSize - value) < 0.1 ? Color.white.opacity(0.14) : .clear,
+                    in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
     }
@@ -523,7 +541,9 @@ struct ReaderView: View {
             .background(themeBackground(item), in: RoundedRectangle(cornerRadius: 8))
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(theme == item ? Color.white.opacity(0.92) : Color.white.opacity(0.09), lineWidth: theme == item ? 2 : 1)
+                    .stroke(
+                        theme == item ? Color.white.opacity(0.92) : Color.white.opacity(0.09),
+                        lineWidth: theme == item ? 2 : 1)
             }
         }
         .buttonStyle(.plain)
@@ -577,10 +597,12 @@ struct ReaderView: View {
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             Button("保存笔记") {
                 guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      noteRange.location != NSNotFound,
-                      noteRange.length > 0 else { return }
+                    noteRange.location != NSNotFound,
+                    noteRange.length > 0
+                else { return }
                 annotations.insert(
-                    ReaderAnnotation(text: noteText, kind: "note", sectionIndex: sectionIndex, range: noteRange),
+                    ReaderAnnotation(
+                        text: noteText, kind: "note", sectionIndex: sectionIndex, range: noteRange),
                     at: 0
                 )
                 isEditingNote = false
@@ -613,7 +635,8 @@ struct ReaderView: View {
 
     private var initialSectionIndex: Int {
         if let position = book.readingPosition,
-           let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID }) {
+            let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID })
+        {
             return index
         }
         guard !book.spine.isEmpty else { return 0 }
@@ -622,7 +645,8 @@ struct ReaderView: View {
 
     private var initialReadingPosition: ReadingPosition? {
         guard let position = book.readingPosition,
-              book.spine.contains(where: { spineIdentity($0) == position.spineID }) else { return nil }
+            book.spine.contains(where: { spineIdentity($0) == position.spineID })
+        else { return nil }
         return position
     }
 
@@ -649,7 +673,9 @@ struct ReaderView: View {
         guard activePanel == nil, !isEditingNote, !isPointerNearChrome else { return }
         hideChromeTask = Task { @MainActor in
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, activePanel == nil, !isEditingNote, !isPointerNearChrome else { return }
+            guard !Task.isCancelled, activePanel == nil, !isEditingNote, !isPointerNearChrome else {
+                return
+            }
             chromeVisible = false
         }
     }
@@ -818,7 +844,9 @@ private struct ReaderFooter: View {
                     .fill(Color.white.opacity(0.16))
                 Capsule()
                     .fill(OBooksPalette.accent)
-                    .frame(width: max(0, geometry.size.width * CGFloat(min(max(progressState.value, 0), 1))))
+                    .frame(
+                        width: max(
+                            0, geometry.size.width * CGFloat(min(max(progressState.value, 0), 1))))
             }
             .frame(height: 4)
             .frame(maxHeight: .infinity)
@@ -874,7 +902,10 @@ private struct ReaderPanelSurface<Content: View>: View {
         }
         .frame(width: width)
         .frame(minHeight: 112, maxHeight: 760)
-        .background(Color(red: 0.12, green: 0.12, blue: 0.12).opacity(0.97), in: RoundedRectangle(cornerRadius: 11))
+        .background(
+            Color(red: 0.12, green: 0.12, blue: 0.12).opacity(0.97),
+            in: RoundedRectangle(cornerRadius: 11)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 11)
                 .stroke(Color.white.opacity(0.2), lineWidth: 1)
