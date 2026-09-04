@@ -10,11 +10,19 @@ final class ReaderTextView: NSTextView {
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
     private var contextLocation = 0
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+        window?.invalidateCursorRects(for: self)
+    }
 
     func setReadingInsets(horizontal: CGFloat, vertical: CGFloat) {
         minimumHorizontalInset = horizontal
         verticalInset = vertical
         updateReadingInsets(for: bounds.width)
+        window?.invalidateCursorRects(for: self)
     }
 
     func updateDocumentHeight(minimumHeight: CGFloat) {
@@ -22,8 +30,10 @@ final class ReaderTextView: NSTextView {
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         let requiredHeight = max(minimumHeight, ceil(usedRect.maxY + verticalInset * 2))
-        guard abs(frame.height - requiredHeight) > 0.5 else { return }
-        super.setFrameSize(NSSize(width: frame.width, height: requiredHeight))
+        if abs(frame.height - requiredHeight) > 0.5 {
+            super.setFrameSize(NSSize(width: frame.width, height: requiredHeight))
+        }
+        window?.invalidateCursorRects(for: self)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -33,6 +43,7 @@ final class ReaderTextView: NSTextView {
         if widthChanged {
             updateDocumentHeight(minimumHeight: superview?.bounds.height ?? 0)
         }
+        window?.invalidateCursorRects(for: self)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -51,6 +62,86 @@ final class ReaderTextView: NSTextView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    override func resetCursorRects() {
+        guard let layoutManager, let textContainer, let textStorage else { return }
+        layoutManager.ensureLayout(for: textContainer)
+        let origin = textContainerOrigin
+        for glyphIndex in 0..<layoutManager.numberOfGlyphs {
+            let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+            guard characterIndex < textStorage.length,
+                  textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil
+            else { continue }
+
+            let character = (textStorage.string as NSString).substring(
+                with: NSRange(location: characterIndex, length: 1)
+            )
+            guard character.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { continue }
+
+            let glyphRect = layoutManager.boundingRect(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1),
+                in: textContainer
+            )
+            guard !glyphRect.isEmpty else { continue }
+            addCursorRect(
+                glyphRect.offsetBy(dx: origin.x, dy: origin.y),
+                cursor: NSCursor.iBeam
+            )
+        }
+    }
+
+    override func updateTrackingAreas() {
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+        super.updateTrackingAreas()
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        cursorTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        updateCursor(for: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        updateCursor(for: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    private func updateCursor(for event: NSEvent) {
+        NSCursor.arrow.set()
+        guard let layoutManager, let textContainer, let textStorage else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return }
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.contains(containerPoint) else { return }
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard characterIndex < textStorage.length,
+              textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil
+        else { return }
+        let character = (textStorage.string as NSString).substring(
+            with: NSRange(location: characterIndex, length: 1)
+        )
+        guard character.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return }
+        NSCursor.iBeam.set()
     }
 
     private func link(at event: NSEvent) -> URL? {
