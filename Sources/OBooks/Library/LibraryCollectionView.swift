@@ -7,6 +7,7 @@ struct LibraryCollectionView: View {
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
     let onDelete: (BookSummary) -> Void
+    let onToggleFinished: (BookSummary) -> Void
 
     var body: some View {
         ScrollView {
@@ -40,7 +41,8 @@ struct LibraryCollectionView: View {
                             CollectionBookCard(
                                 book: book,
                                 store: store,
-                                onDelete: { onDelete(book) }
+                                onDelete: { onDelete(book) },
+                                onToggleFinished: { onToggleFinished(book) }
                             ) {
                                 onOpen(book)
                             }
@@ -78,6 +80,7 @@ private struct CollectionBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    let onToggleFinished: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -101,7 +104,11 @@ private struct CollectionBookCard: View {
                 }
                 .buttonStyle(.plain)
 
-                BookActionMenu(onDelete: onDelete)
+                BookActionMenu(
+                    isFinished: book.isFinished,
+                    onToggleFinished: onToggleFinished,
+                    onDelete: onDelete
+                )
                     .frame(width: 30, height: 26)
             }
             .padding(.top, 5)
@@ -122,6 +129,10 @@ private struct CollectionBookCard: View {
                     .frame(width: 30, alignment: .center)
             }
         }
-        .bookContextMenu(onDelete: onDelete)
+        .bookContextMenu(
+            isFinished: book.isFinished,
+            onToggleFinished: onToggleFinished,
+            onDelete: onDelete
+        )
     }
 }

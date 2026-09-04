@@ -62,7 +62,7 @@ struct LibraryView: View {
         case .wishlist:
             return matching.filter { $0.progressFraction == 0 }
         case .finished:
-            return matching.filter { $0.progressFraction >= 1 }
+            return matching.filter(\.isFinished)
         }
     }
 
@@ -78,7 +78,8 @@ struct LibraryView: View {
                     store: appModel.libraryStore,
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
-                    onDelete: requestDelete
+                    onDelete: requestDelete,
+                    onToggleFinished: { appModel.toggleFinished(for: $0.id) }
                 )
             } else {
                 LibraryCollectionView(
@@ -87,7 +88,8 @@ struct LibraryView: View {
                     store: appModel.libraryStore,
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
-                    onDelete: requestDelete
+                    onDelete: requestDelete,
+                    onToggleFinished: { appModel.toggleFinished(for: $0.id) }
                 )
             }
         }

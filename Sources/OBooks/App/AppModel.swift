@@ -174,6 +174,16 @@ final class AppModel: ObservableObject {
         scheduleProgressSave()
     }
 
+    func toggleFinished(for bookID: UUID) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else {
+            return
+        }
+        books[index].isFinished.toggle()
+        let book = books[index]
+        libraryStore.save(books)
+        logger.info("更新阅读完成状态: title=\(book.title, privacy: .public), finished=\(book.isFinished, privacy: .public)")
+    }
+
     private func scheduleProgressSave() {
         progressSaveTask?.cancel()
         progressSaveTask = Task { @MainActor [weak self] in

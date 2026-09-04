@@ -1,5 +1,19 @@
 import SwiftUI
 
+struct FinishBookMenuItem: View {
+    let isFinished: Bool
+    let onToggleFinished: () -> Void
+
+    var body: some View {
+        Button(action: onToggleFinished) {
+            Label(
+                isFinished ? "取消已读完" : "标记为已读完",
+                systemImage: isFinished ? "arrow.uturn.backward" : "checkmark.circle"
+            )
+        }
+    }
+}
+
 struct DeleteBookMenuItem: View {
     let onDelete: () -> Void
 
@@ -11,10 +25,14 @@ struct DeleteBookMenuItem: View {
 }
 
 struct BookActionMenu: View {
+    let isFinished: Bool
+    let onToggleFinished: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         Menu {
+            FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
+            Divider()
             DeleteBookMenuItem(onDelete: onDelete)
         } label: {
             Image(systemName: "ellipsis")
@@ -31,8 +49,13 @@ struct BookActionMenu: View {
 }
 
 extension View {
-    func bookContextMenu(onDelete: @escaping () -> Void) -> some View {
+    func bookContextMenu(
+        isFinished: Bool,
+        onToggleFinished: @escaping () -> Void,
+        onDelete: @escaping () -> Void
+    ) -> some View {
         contextMenu {
+            FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
             DeleteBookMenuItem(onDelete: onDelete)
         }
     }

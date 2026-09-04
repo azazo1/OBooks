@@ -7,15 +7,16 @@ struct LibraryHomeView: View {
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
     let onDelete: (BookSummary) -> Void
+    let onToggleFinished: (BookSummary) -> Void
 
     private var continueBooks: [BookSummary] {
-        books.sorted { lhs, rhs in
+        books.filter { !$0.isFinished }.sorted { lhs, rhs in
             (lhs.lastOpenedAt ?? lhs.importedAt) > (rhs.lastOpenedAt ?? rhs.importedAt)
         }.prefix(3).map { $0 }
     }
 
     private var completedBooks: [BookSummary] {
-        books.filter { $0.progressFraction >= 1 }.prefix(10).map { $0 }
+        books.filter(\.isFinished).prefix(10).map { $0 }
     }
 
     var body: some View {
@@ -30,7 +31,12 @@ struct LibraryHomeView: View {
                         ScrollView(.horizontal) {
                             LazyHStack(spacing: 18) {
                                 ForEach(continueBooks) { book in
-                                    ContinueBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
+                                    ContinueBookCard(
+                                        book: book,
+                                        store: store,
+                                        onDelete: { onDelete(book) },
+                                        onToggleFinished: { onToggleFinished(book) }
+                                    ) { onOpen(book) }
                                 }
                             }
                             .padding(.vertical, 4)
@@ -46,7 +52,12 @@ struct LibraryHomeView: View {
                         ScrollView(.horizontal) {
                             LazyHStack(spacing: 20) {
                                 ForEach(books.prefix(6)) { book in
-                                    PreviousBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
+                                    PreviousBookCard(
+                                        book: book,
+                                        store: store,
+                                        onDelete: { onDelete(book) },
+                                        onToggleFinished: { onToggleFinished(book) }
+                                    ) { onOpen(book) }
                                 }
                             }
                             .padding(.vertical, 4)
@@ -64,7 +75,12 @@ struct LibraryHomeView: View {
                     } else {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 22)], alignment: .leading, spacing: 26) {
                             ForEach(completedBooks) { book in
-                                CompactBookCard(book: book, store: store, onDelete: { onDelete(book) }) { onOpen(book) }
+                                    CompactBookCard(
+                                        book: book,
+                                        store: store,
+                                        onDelete: { onDelete(book) },
+                                        onToggleFinished: { onToggleFinished(book) }
+                                    ) { onOpen(book) }
                             }
                         }
                     }
@@ -168,44 +184,73 @@ private struct ContinueBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    let onToggleFinished: () -> Void
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                BookCoverImage(book: book, store: store)
-                    .frame(width: 48, height: 68)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(book.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .lineLimit(2)
-                    Text(book.authorLabel)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                    HStack(spacing: 7) {
-                        ProgressView(value: book.progressFraction)
-                            .progressViewStyle(.linear)
-                            .tint(OBooksPalette.accent)
-                            .frame(width: 86)
-                        Text("\(Int(book.progressFraction * 100))%")
-                            .font(.system(size: 10).monospacedDigit())
+        VStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    BookCoverImage(book: book, store: store)
+                        .frame(width: 48, height: 68)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(book.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .lineLimit(2)
+                        Text(book.authorLabel)
+                            .font(.system(size: 11))
                             .foregroundStyle(.white.opacity(0.58))
+                            .lineLimit(1)
+                        HStack(spacing: 7) {
+                            ProgressView(value: book.progressFraction)
+                                .progressViewStyle(.linear)
+                                .tint(OBooksPalette.accent)
+                                .frame(width: 86)
+                            Text("\(Int(book.progressFraction * 100))%")
+                                .font(.system(size: 10).monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.58))
+                        }
                     }
+                    Spacer(minLength: 4)
                 }
-                Spacer(minLength: 4)
+                .padding(12)
+                .frame(width: 232, height: 94)
             }
-            .padding(12)
-            .frame(width: 232, height: 94)
-            .background(OBooksPalette.card, in: RoundedRectangle(cornerRadius: 9))
+            .buttonStyle(.plain)
+
+            if book.isNearCompletion {
+                Button(action: onToggleFinished) {
+                    Label("标记为已读完", systemImage: "checkmark.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.84))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 10)
+                .frame(height: 36)
+                .background(Color.black.opacity(0.08))
+            }
         }
-        .buttonStyle(.plain)
-        .overlay(alignment: .bottomTrailing) {
-            BookActionMenu(onDelete: onDelete)
-                .padding(6)
+        .frame(width: 232, height: book.isNearCompletion ? 130 : 94)
+        .background(OBooksPalette.card, in: RoundedRectangle(cornerRadius: 9))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(alignment: .topTrailing) {
+            BookActionMenu(
+                isFinished: book.isFinished,
+                onToggleFinished: onToggleFinished,
+                onDelete: onDelete
+            )
+            .padding(6)
         }
-        .bookContextMenu(onDelete: onDelete)
+        .bookContextMenu(
+            isFinished: book.isFinished,
+            onToggleFinished: onToggleFinished,
+            onDelete: onDelete
+        )
     }
 }
 
@@ -213,6 +258,7 @@ private struct PreviousBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    let onToggleFinished: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -233,10 +279,18 @@ private struct PreviousBookCard: View {
         }
         .buttonStyle(.plain)
         .overlay(alignment: .bottomTrailing) {
-            BookActionMenu(onDelete: onDelete)
-                .padding(6)
+            BookActionMenu(
+                isFinished: book.isFinished,
+                onToggleFinished: onToggleFinished,
+                onDelete: onDelete
+            )
+            .padding(6)
         }
-        .bookContextMenu(onDelete: onDelete)
+        .bookContextMenu(
+            isFinished: book.isFinished,
+            onToggleFinished: onToggleFinished,
+            onDelete: onDelete
+        )
     }
 }
 
@@ -244,6 +298,7 @@ private struct CompactBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    let onToggleFinished: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -260,10 +315,18 @@ private struct CompactBookCard: View {
         }
         .buttonStyle(.plain)
         .overlay(alignment: .bottomTrailing) {
-            BookActionMenu(onDelete: onDelete)
-                .padding(6)
+            BookActionMenu(
+                isFinished: book.isFinished,
+                onToggleFinished: onToggleFinished,
+                onDelete: onDelete
+            )
+            .padding(6)
         }
-        .bookContextMenu(onDelete: onDelete)
+        .bookContextMenu(
+            isFinished: book.isFinished,
+            onToggleFinished: onToggleFinished,
+            onDelete: onDelete
+        )
     }
 }
 

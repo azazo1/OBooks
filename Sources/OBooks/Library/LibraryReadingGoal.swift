@@ -4,7 +4,7 @@ struct ReadingGoalCard: View {
     let books: [BookSummary]
 
     private var completedCount: Int {
-        books.filter { $0.progressFraction >= 1 }.count
+        books.filter(\.isFinished).count
     }
 
     private var progress: Double {

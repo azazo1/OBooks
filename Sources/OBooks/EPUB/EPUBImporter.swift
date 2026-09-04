@@ -20,7 +20,7 @@ struct EPUBImporter {
             let title = package.title.isEmpty ? sourceURL.deletingPathExtension().lastPathComponent : package.title
             let book = BookSummary(id: id, title: title, authors: package.authors, sortTitle: title.localizedLowercase,
                 sourceFileName: sourceURL.lastPathComponent, folderName: id.uuidString, coverPath: package.coverPath,
-                spine: package.spine, toc: package.toc, progressFraction: 0, lastOpenedAt: nil, importedAt: Date())
+                spine: package.spine, toc: package.toc, progressFraction: 0, lastOpenedAt: nil, importedAt: Date(), isFinished: false)
             logger.info("导入完成: chapters=\(package.spine.count), seconds=\(Date().timeIntervalSince(startedAt), privacy: .public)")
             return book
         } catch { try? fileManager.removeItem(at: destination); throw error }
