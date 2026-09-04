@@ -15,6 +15,7 @@ final class ReaderScrollView: NSScrollView {
     private var interactivePageSettling = false
     private var preciseGestureActive = false
     private var precisePageAttempted = false
+    private var documentHiddenBeforeTransition: Bool?
     private let responseDuration: CFTimeInterval = 0.12
 
     private final class InteractivePageTransition: @unchecked Sendable {
@@ -101,10 +102,11 @@ final class ReaderScrollView: NSScrollView {
         )
         addSubview(oldView)
         addSubview(newView)
+        beginTransitionIsolation()
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.32
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = transitionTimingFunction()
             oldView.animator().frame = outgoingFrame(
                 from: restingFrame,
                 orientation: orientation,
@@ -112,9 +114,12 @@ final class ReaderScrollView: NSScrollView {
             )
             oldView.animator().alphaValue = 0.56
             newView.animator().frame = restingFrame
-        } completionHandler: { [weak oldView, weak newView] in
-            oldView?.removeFromSuperview()
-            newView?.removeFromSuperview()
+        } completionHandler: { [weak self, weak oldView, weak newView] in
+            Task { @MainActor in
+                oldView?.removeFromSuperview()
+                newView?.removeFromSuperview()
+                self?.endTransitionIsolation()
+            }
         }
     }
 
@@ -282,6 +287,7 @@ final class ReaderScrollView: NSScrollView {
         configureIncomingView(newView, orientation: orientation, direction: direction)
         addSubview(oldView)
         addSubview(newView)
+        beginTransitionIsolation()
         let transition = InteractivePageTransition(
             oldView: oldView,
             newView: newView,
@@ -305,7 +311,7 @@ final class ReaderScrollView: NSScrollView {
         transition.translation = transition.direction > 0
             ? min(0, max(-extent, proposed))
             : max(0, min(extent, proposed))
-        let threshold = max(96, extent * 0.32)
+        let threshold = interactiveThreshold(for: extent)
         let progress = min(1, abs(transition.translation) / threshold)
         applyInteractivePage(transition, progress: progress)
     }
@@ -315,8 +321,8 @@ final class ReaderScrollView: NSScrollView {
         interactivePage = nil
         interactivePageSettling = true
         let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
-        let threshold = max(96, extent * 0.32)
-        let shouldCommit = abs(transition.translation) >= threshold * 0.72
+        let threshold = interactiveThreshold(for: extent)
+        let shouldCommit = abs(transition.translation) >= threshold * 0.62
         let targetProgress = CGFloat(shouldCommit ? 1 : 0)
         let targetTranslation = shouldCommit
             ? -CGFloat(transition.direction) * threshold
@@ -342,7 +348,7 @@ final class ReaderScrollView: NSScrollView {
         }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = shouldCommit ? 0.2 : 0.24
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = transitionTimingFunction()
             transition.oldView.animator().frame = oldFrame
             transition.oldView.animator().alphaValue = shouldCommit ? 0.56 : 1
             transition.newView.animator().frame = shouldCommit
@@ -360,6 +366,7 @@ final class ReaderScrollView: NSScrollView {
                 if !shouldCommit {
                     self.scroll(to: transition.startOffset, animated: false)
                 }
+                self.endTransitionIsolation()
                 self.pageTurnRollbackOffset = nil
                 self.interactivePageSettling = false
             }
@@ -408,6 +415,30 @@ final class ReaderScrollView: NSScrollView {
             orientation: orientation,
             direction: direction
         )
+    }
+
+    private func interactiveThreshold(for extent: CGFloat) -> CGFloat {
+        max(96, extent * 0.3)
+    }
+
+    private func transitionTimingFunction() -> CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.16, 0.82, 0.22, 1.0)
+    }
+
+    private func beginTransitionIsolation() {
+        guard documentHiddenBeforeTransition == nil else { return }
+        let wasHidden = documentView?.isHidden ?? false
+        documentHiddenBeforeTransition = wasHidden
+        documentView?.isHidden = true
+    }
+
+    private func endTransitionIsolation() {
+        guard let wasHidden = documentHiddenBeforeTransition else { return }
+        documentView?.isHidden = wasHidden
+        if !wasHidden {
+            documentView?.displayIfNeeded()
+        }
+        documentHiddenBeforeTransition = nil
     }
 
     private func pageExtent(for orientation: ReaderPageOrientation, frame: NSRect) -> CGFloat {
