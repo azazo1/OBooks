@@ -29,4 +29,42 @@ final class NativeReaderViewTests: XCTestCase {
         XCTAssertGreaterThan(textView.frame.height, scrollView.contentSize.height)
         XCTAssertGreaterThan(textView.layoutManager?.usedRect(for: textView.textContainer!).height ?? 0, scrollView.contentSize.height)
     }
+
+    func testTeardownIsSilentAndIdempotent() {
+        let coordinator = NativeReaderView.Coordinator()
+        let book = BookSummary(
+            id: UUID(),
+            title: "Test",
+            authors: [],
+            sortTitle: "test",
+            sourceFileName: "test.epub",
+            folderName: UUID().uuidString,
+            coverPath: nil,
+            spine: [],
+            toc: [],
+            progressFraction: 0,
+            lastOpenedAt: nil,
+            importedAt: Date()
+        )
+        var speakingStates: [Bool] = []
+        coordinator.update(
+            book: book,
+            sectionIndex: 0,
+            theme: .focus,
+            fontSize: 18,
+            lineHeight: 1.7,
+            margin: 56,
+            annotations: [],
+            onProgress: { _ in },
+            onBoundary: { _ in },
+            onSpeakingChanged: { speakingStates.append($0) },
+            onAnnotation: { _, _, _ in },
+            onNoteRequest: { _, _ in }
+        )
+
+        coordinator.teardown()
+        coordinator.teardown()
+
+        XCTAssertTrue(speakingStates.isEmpty)
+    }
 }

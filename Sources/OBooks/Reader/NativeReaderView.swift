@@ -129,6 +129,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var isTornDown = false
         var lastCommandID: UUID?
 
         deinit {
@@ -143,6 +144,7 @@ struct NativeReaderView: NSViewRepresentable {
             }
             self.scrollView = scrollView
             self.textView = textView
+            isTornDown = false
             textView.onHighlight = { [weak self] text, range in
                 self?.onAnnotation(text, "highlight", range)
             }
@@ -259,11 +261,22 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         func teardown() {
-            stopSpeech()
+            isTornDown = true
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
             }
             scrollObserver = nil
+            onProgress = { _ in }
+            onBoundary = { _ in }
+            onSpeakingChanged = { _ in }
+            onAnnotation = { _, _, _ in }
+            onNoteRequest = { _, _ in }
+            speech.onRange = nil
+            speech.onFinished = nil
+            speech.onStateChanged = nil
+            speech.stop()
+            speechRange = nil
+            renderedAnnotationRanges.removeAll()
             textView?.onHighlight = nil
             textView?.onNote = nil
             textView?.onSpeak = nil
@@ -280,7 +293,7 @@ struct NativeReaderView: NSViewRepresentable {
                 self.showSpeechRange(NSRange(location: self.speechBaseLocation + range.location, length: range.length))
             }
             speech.onStateChanged = { [weak self] speaking in
-                self?.onSpeakingChanged(speaking)
+                self?.notifySpeakingChanged(speaking)
                 if !speaking {
                     self?.clearSpeechRange()
                 }
@@ -296,7 +309,7 @@ struct NativeReaderView: NSViewRepresentable {
             speech.onFinished = nil
             speech.onStateChanged = nil
             speech.stop()
-            onSpeakingChanged(false)
+            notifySpeakingChanged(false)
             clearSpeechRange()
         }
 
@@ -356,6 +369,30 @@ struct NativeReaderView: NSViewRepresentable {
             }
         }
 
+        private func notifyProgress(_ value: Double) {
+            let callback = onProgress
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTornDown else { return }
+                callback(value)
+            }
+        }
+
+        private func notifyBoundary(_ direction: Int) {
+            let callback = onBoundary
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTornDown else { return }
+                callback(direction)
+            }
+        }
+
+        private func notifySpeakingChanged(_ value: Bool) {
+            let callback = onSpeakingChanged
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTornDown else { return }
+                callback(value)
+            }
+        }
+
         @discardableResult
         private func updateDocumentLayout() -> CGFloat {
             guard let scrollView, let textView else { return 0 }
@@ -374,11 +411,11 @@ struct NativeReaderView: NSViewRepresentable {
             let current = clipView.bounds.origin.y
             let maximum = maximumScrollOffset()
             if direction > 0, current >= maximum - 2 {
-                onBoundary(1)
+                notifyBoundary(1)
                 return
             }
             if direction < 0, current <= 2 {
-                onBoundary(-1)
+                notifyBoundary(-1)
                 return
             }
             let amount = max(240, clipView.bounds.height * 0.88)
@@ -398,7 +435,7 @@ struct NativeReaderView: NSViewRepresentable {
             guard let scrollView else { return }
             let maximum = maximumScrollOffset()
             let fraction = maximum > 0 ? scrollView.contentView.bounds.origin.y / maximum : 0
-            onProgress(min(1, max(0, fraction)))
+            notifyProgress(min(1, max(0, fraction)))
         }
 
         private func firstVisibleCharacterLocation() -> Int {
