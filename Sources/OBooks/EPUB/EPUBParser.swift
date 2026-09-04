@@ -71,7 +71,7 @@ struct EPUBParser {
         guard let node else { return [] }
         return node.children.filter { $0.name == "li" }.compactMap { item in
             guard let anchor = item.children.first(where: { $0.name == "a" }), let href = anchor.attribute("href"),
-                  let target = try? safeRelativePath(href, relativeTo: baseURL, rootURL: rootURL) else { return nil }
+                  let target = try? safeRelativeHref(href, relativeTo: baseURL, rootURL: rootURL) else { return nil }
             let nested = item.children.first(where: { $0.name == "ol" })
             return EPUBTOCItem(label: cleanText(anchor.textContent) ?? "未命名章节", href: target, children: parseNavList(nested, baseURL: baseURL, rootURL: rootURL))
         }
@@ -84,7 +84,7 @@ struct EPUBParser {
 
     private func parseNCXPoints(_ points: [XMLNode], baseURL: URL, rootURL: URL) -> [EPUBTOCItem] {
         points.compactMap { point in
-            guard let src = point.first(named: "content")?.attribute("src"), let target = try? safeRelativePath(src, relativeTo: baseURL, rootURL: rootURL) else { return nil }
+            guard let src = point.first(named: "content")?.attribute("src"), let target = try? safeRelativeHref(src, relativeTo: baseURL, rootURL: rootURL) else { return nil }
             let children = parseNCXPoints(point.children.filter { $0.name == "navpoint" }, baseURL: baseURL, rootURL: rootURL)
             return EPUBTOCItem(label: cleanText(point.first(named: "text")?.textContent) ?? "未命名章节", href: target, children: children)
         }
@@ -102,6 +102,14 @@ struct EPUBParser {
             if let nested = tocTitle(for: href, in: item.children) { return nested }
         }
         return nil
+    }
+
+    private func safeRelativeHref(_ href: String, relativeTo baseURL: URL, rootURL: URL) throws -> String {
+        let parts = href.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let path = try safeRelativePath(String(parts[0]), relativeTo: baseURL, rootURL: rootURL)
+        guard parts.count == 2 else { return path }
+        let fragment = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        return path + "#" + fragment
     }
 
     private func cleanText(_ text: String?) -> String? {

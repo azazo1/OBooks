@@ -5,6 +5,7 @@ final class ReaderTextView: NSTextView {
     var onHighlight: ((String, NSRange) -> Void)?
     var onNote: ((String, NSRange) -> Void)?
     var onSpeak: ((Int) -> Void)?
+    var onLink: ((URL) -> Void)?
     var preferredReadingWidth: CGFloat = 820
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
@@ -42,6 +43,29 @@ final class ReaderTextView: NSTextView {
         super.scrollWheel(with: event)
     }
 
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let link = link(at: event) {
+            onLink?(link)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    private func link(at event: NSEvent) -> URL? {
+        guard let layoutManager, let textContainer else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return nil }
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard let textStorage,
+              characterIndex < textStorage.length,
+              let link = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) as? URL else { return nil }
+        return link
+    }
     override func menu(for event: NSEvent) -> NSMenu? {
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)
         contextLocation = range.length > 0 ? range.location : characterLocation(for: event)

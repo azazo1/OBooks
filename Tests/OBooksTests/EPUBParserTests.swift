@@ -15,7 +15,7 @@ final class EPUBParserTests: XCTestCase {
         XCTAssertEqual(info.spine[0].href, "OEBPS/Text/chapter-1.xhtml")
         XCTAssertEqual(info.spine[0].title, "Chapter One")
         XCTAssertEqual(info.toc.first?.label, "Chapter One")
-        XCTAssertEqual(info.toc.first?.href, "OEBPS/Text/chapter-1.xhtml")
+        XCTAssertEqual(info.toc.first?.href, "OEBPS/Text/chapter-1.xhtml#section")
     }
 
     func testRejectsEncryptedPackage() throws {
@@ -65,7 +65,7 @@ final class EPUBParserTests: XCTestCase {
 
         try write("""
         <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-          <body><nav epub:type="toc"><ol><li><a href="chapter-1.xhtml">Chapter One</a></li><li><a href="chapter-2.xhtml">Chapter Two</a></li></ol></nav></body>
+          <body><nav epub:type="toc"><ol><li><a href="chapter-1.xhtml#section">Chapter One</a></li><li><a href="chapter-2.xhtml">Chapter Two</a></li></ol></nav></body>
         </html>
         """, to: text.appendingPathComponent("nav.xhtml"))
         try write("<html><body><p>One</p></body></html>", to: text.appendingPathComponent("chapter-1.xhtml"))

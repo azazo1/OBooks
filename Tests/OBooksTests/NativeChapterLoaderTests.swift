@@ -37,4 +37,46 @@ final class NativeChapterLoaderTests: XCTestCase {
         XCTAssertGreaterThan(chapterFont.pointSize, 18)
         XCTAssertFalse(result.string.contains("ignored"))
     }
+
+    func testRendersHTMLCSSAndAnchors() throws {
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let chapterURL = rootURL.appendingPathComponent("chapter.xhtml")
+        let data = Data("""
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <head><style>
+            body { font-size: 20px; color: #ff0000; }
+            .note { font-weight: bold; text-align: center; }
+          </style></head>
+          <body>
+            <p id="intro">Intro</p>
+            <div class="note">Styled</div>
+            <p><a href="#intro">Back</a></p>
+          </body>
+        </html>
+        """.utf8)
+
+        let document = try NativeChapterLoader().loadDocument(
+            data: data,
+            chapterURL: chapterURL,
+            rootURL: rootURL,
+            fontSize: 18,
+            lineHeight: 1.7,
+            foreground: .textColor
+        )
+
+        XCTAssertEqual(document.attributedText.string.split(whereSeparator: \.isNewline).map(String.init), ["Intro", "Styled", "Back"])
+        XCTAssertEqual(document.anchors["intro"], 0)
+        let styledRange = (document.attributedText.string as NSString).range(of: "Styled")
+        let styledFont = try XCTUnwrap(document.attributedText.attribute(.font, at: styledRange.location, effectiveRange: nil) as? NSFont)
+        XCTAssertGreaterThan(styledFont.pointSize, 18)
+        XCTAssertTrue(NSFontManager.shared.traits(of: styledFont).contains(.boldFontMask))
+        let paragraph = try XCTUnwrap(document.attributedText.attribute(.paragraphStyle, at: styledRange.location, effectiveRange: nil) as? NSParagraphStyle)
+        XCTAssertEqual(paragraph.alignment, .center)
+        let color = try XCTUnwrap(document.attributedText.attribute(.foregroundColor, at: styledRange.location, effectiveRange: nil) as? NSColor)
+        let rgbColor = try XCTUnwrap(color.usingColorSpace(.deviceRGB))
+        XCTAssertEqual(Double(rgbColor.redComponent), 1, accuracy: 0.01)
+        let linkRange = (document.attributedText.string as NSString).range(of: "Back")
+        let link = try XCTUnwrap(document.attributedText.attribute(.link, at: linkRange.location, effectiveRange: nil) as? URL)
+        XCTAssertEqual(link.fragment, "intro")
+    }
 }

@@ -5,6 +5,7 @@ import SwiftUI
 struct NativeReaderView: NSViewRepresentable {
     let book: BookSummary
     @Binding var sectionIndex: Int
+    @Binding var pendingAnchor: String?
     let theme: ReadingTheme
     let fontSize: Double
     let lineHeight: Double
@@ -16,6 +17,8 @@ struct NativeReaderView: NSViewRepresentable {
     let onSpeakingChanged: (Bool) -> Void
     let onAnnotation: (String, String, NSRange) -> Void
     let onNoteRequest: (String, NSRange) -> Void
+    let onNavigate: (Int, String?) -> Void
+    let onAnchorConsumed: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -62,6 +65,7 @@ struct NativeReaderView: NSViewRepresentable {
         context.coordinator.update(
             book: book,
             sectionIndex: sectionIndex,
+            pendingAnchor: pendingAnchor,
             theme: theme,
             fontSize: fontSize,
             lineHeight: lineHeight,
@@ -71,7 +75,9 @@ struct NativeReaderView: NSViewRepresentable {
             onBoundary: onBoundary,
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
-            onNoteRequest: onNoteRequest
+            onNoteRequest: onNoteRequest,
+            onNavigate: onNavigate,
+            onAnchorConsumed: onAnchorConsumed
         )
         context.coordinator.loadSectionIfNeeded()
         return scrollView
@@ -82,6 +88,7 @@ struct NativeReaderView: NSViewRepresentable {
         coordinator.update(
             book: book,
             sectionIndex: sectionIndex,
+            pendingAnchor: pendingAnchor,
             theme: theme,
             fontSize: fontSize,
             lineHeight: lineHeight,
@@ -91,7 +98,9 @@ struct NativeReaderView: NSViewRepresentable {
             onBoundary: onBoundary,
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
-            onNoteRequest: onNoteRequest
+            onNoteRequest: onNoteRequest,
+            onNavigate: onNavigate,
+            onAnchorConsumed: onAnchorConsumed
         )
         coordinator.loadSectionIfNeeded()
         if coordinator.lastCommandID != controller.command?.id, let command = controller.command {
@@ -121,7 +130,9 @@ struct NativeReaderView: NSViewRepresentable {
         private var scrollObserver: NSObjectProtocol?
         private var book: BookSummary?
         private var requestedSectionIndex = 0
+        private var pendingAnchor: String?
         private var currentSectionIndex = -1
+        private var anchors: [String: Int] = [:]
         private var settings = Settings(theme: .focus, fontSize: 18, lineHeight: 1.7, margin: 56)
         private var loadedSettings: Settings?
         private var annotations: [ReaderAnnotation] = []
@@ -133,6 +144,8 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var onNavigate: (Int, String?) -> Void = { _, _ in }
+        private var onAnchorConsumed: () -> Void = {}
         private var pendingProgress: Double?
         private var progressCallbackScheduled = false
         private var isTornDown = false
@@ -160,6 +173,9 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onSpeak = { [weak self] location in
                 self?.startSpeech(at: location)
             }
+            textView.onLink = { [weak self] url in
+                self?.openLink(url)
+            }
 
             scrollView.contentView.postsBoundsChangedNotifications = true
             scrollObserver = NotificationCenter.default.addObserver(
@@ -176,6 +192,7 @@ struct NativeReaderView: NSViewRepresentable {
         func update(
             book: BookSummary,
             sectionIndex: Int,
+            pendingAnchor: String?,
             theme: ReadingTheme,
             fontSize: Double,
             lineHeight: Double,
@@ -185,10 +202,14 @@ struct NativeReaderView: NSViewRepresentable {
             onBoundary: @escaping (Int) -> Void,
             onSpeakingChanged: @escaping (Bool) -> Void,
             onAnnotation: @escaping (String, String, NSRange) -> Void,
-            onNoteRequest: @escaping (String, NSRange) -> Void
+            onNoteRequest: @escaping (String, NSRange) -> Void,
+            onNavigate: @escaping (Int, String?) -> Void,
+            onAnchorConsumed: @escaping () -> Void
         ) {
             self.book = book
             requestedSectionIndex = sectionIndex
+            let anchorChanged = self.pendingAnchor != pendingAnchor
+            self.pendingAnchor = pendingAnchor
             settings = Settings(theme: theme, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
             let annotationsChanged = self.annotations != annotations
             self.annotations = annotations
@@ -197,8 +218,14 @@ struct NativeReaderView: NSViewRepresentable {
             self.onSpeakingChanged = onSpeakingChanged
             self.onAnnotation = onAnnotation
             self.onNoteRequest = onNoteRequest
+            self.onNavigate = onNavigate
+            self.onAnchorConsumed = onAnchorConsumed
             if annotationsChanged {
                 applyAnnotations()
+            }
+            if anchorChanged, currentSectionIndex == sectionIndex, let pendingAnchor, let location = anchors[pendingAnchor] {
+                scrollToCharacter(location, animated: true)
+                consumePendingAnchor()
             }
         }
 
@@ -209,13 +236,14 @@ struct NativeReaderView: NSViewRepresentable {
             stopSpeech()
             let appearance = NativeReaderAppearance(theme: settings.theme)
             do {
-                let attributedText = try loader.load(
+                let document = try loader.loadDocument(
                     book: book,
                     sectionIndex: requestedSectionIndex,
                     fontSize: settings.fontSize,
                     lineHeight: settings.lineHeight,
                     foreground: appearance.foreground
                 )
+                let attributedText = document.attributedText
                 textView.backgroundColor = appearance.background
                 textView.insertionPointColor = appearance.accent
                 textView.selectedTextAttributes = [
@@ -230,10 +258,16 @@ struct NativeReaderView: NSViewRepresentable {
                 textView.textStorage?.setAttributedString(attributedText)
                 scrollView.backgroundColor = appearance.background
                 currentSectionIndex = requestedSectionIndex
+                anchors = document.anchors
                 loadedSettings = settings
                 applyAnnotations()
                 updateDocumentLayout()
-                if previousSectionIndex >= 0, requestedSectionIndex < previousSectionIndex {
+                if let pendingAnchor, let location = anchors[pendingAnchor] {
+                    scrollToCharacter(location, animated: false)
+                    consumePendingAnchor()
+                } else if pendingAnchor != nil {
+                    consumePendingAnchor()
+                } else if previousSectionIndex >= 0, requestedSectionIndex < previousSectionIndex {
                     scrollToEnd()
                 } else {
                     scrollView.contentView.scroll(to: .zero)
@@ -279,6 +313,8 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
+            onNavigate = { _, _ in }
+            onAnchorConsumed = {}
             pendingProgress = nil
             speech.onRange = nil
             speech.onFinished = nil
@@ -289,6 +325,52 @@ struct NativeReaderView: NSViewRepresentable {
             textView?.onHighlight = nil
             textView?.onNote = nil
             textView?.onSpeak = nil
+            textView?.onLink = nil
+        }
+
+        private func consumePendingAnchor() {
+            pendingAnchor = nil
+            let callback = onAnchorConsumed
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTornDown else { return }
+                callback()
+            }
+        }
+
+        private func openLink(_ url: URL) {
+            guard let book else { return }
+            let rootURL = book.folderURL.standardizedFileURL
+            let candidate = url.standardizedFileURL
+            guard candidate.path.hasPrefix(rootURL.path + "/") else {
+                NSWorkspace.shared.open(url)
+                return
+            }
+            let relativePath = String(candidate.path.dropFirst(rootURL.path.count + 1))
+            guard let sectionIndex = book.spine.firstIndex(where: { $0.href == relativePath }) else {
+                return
+            }
+            onNavigate(sectionIndex, url.fragment?.removingPercentEncoding)
+        }
+
+        private func scrollToCharacter(_ location: Int, animated: Bool) {
+            guard let textView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
+            let length = (textView.string as NSString).length
+            guard location >= 0, location <= length else { return }
+            let glyphIndex = location < length ? layoutManager.glyphIndexForCharacter(at: location) : layoutManager.numberOfGlyphs
+            let rect: NSRect
+            if glyphIndex < layoutManager.numberOfGlyphs {
+                rect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+            } else {
+                rect = layoutManager.usedRect(for: textContainer)
+            }
+            let y = max(0, rect.minY + textView.textContainerOrigin.y - 56)
+            if animated {
+                (scrollView as? ReaderScrollView)?.scroll(to: y, animated: true)
+            } else if let scrollView {
+                (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
+                scrollView.contentView.scroll(to: NSPoint(x: 0, y: y))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
         }
 
         private func startSpeech(at location: Int) {

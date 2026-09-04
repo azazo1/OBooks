@@ -50,6 +50,7 @@ final class NativeReaderViewTests: XCTestCase {
         coordinator.update(
             book: book,
             sectionIndex: 0,
+            pendingAnchor: nil,
             theme: .focus,
             fontSize: 18,
             lineHeight: 1.7,
@@ -59,7 +60,9 @@ final class NativeReaderViewTests: XCTestCase {
             onBoundary: { _ in },
             onSpeakingChanged: { speakingStates.append($0) },
             onAnnotation: { _, _, _ in },
-            onNoteRequest: { _, _ in }
+            onNoteRequest: { _, _ in },
+            onNavigate: { _, _ in },
+            onAnchorConsumed: {}
         )
 
         coordinator.teardown()

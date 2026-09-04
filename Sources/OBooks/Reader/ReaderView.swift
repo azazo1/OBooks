@@ -91,6 +91,7 @@ struct ReaderView: View {
     let book: BookSummary
     @State private var controller = ReaderController()
     @State private var sectionIndex = 0
+    @State private var pendingAnchor: String?
     @State private var progressState = ReaderProgressState()
     @State private var theme: ReadingTheme = .focus
     @State private var fontSize = 18.0
@@ -116,6 +117,7 @@ struct ReaderView: View {
             NativeReaderView(
                 book: book,
                 sectionIndex: $sectionIndex,
+                pendingAnchor: $pendingAnchor,
                 theme: theme,
                 fontSize: fontSize,
                 lineHeight: lineHeight,
@@ -144,6 +146,12 @@ struct ReaderView: View {
                     noteText = ""
                     isEditingNote = true
                     keepChromeVisible()
+                },
+                onNavigate: { index, anchor in
+                    navigateTo(sectionIndex: index, anchor: anchor)
+                },
+                onAnchorConsumed: {
+                    pendingAnchor = nil
                 }
             )
 
@@ -307,10 +315,7 @@ struct ReaderView: View {
                 } else {
                     ForEach(flatten(book.toc)) { entry in
                         Button {
-                            if let index = sectionIndex(for: entry.item.href) {
-                                sectionIndex = index
-                                activePanel = nil
-                            }
+                            navigateTo(href: entry.item.href)
                         } label: {
                             Text(entry.item.label)
                                 .font(.system(size: 13, weight: .medium))
@@ -635,6 +640,21 @@ struct ReaderView: View {
         guard book.spine.indices.contains(next) else { return }
         sectionIndex = next
         progressState.setInitialValue(direction > 0 ? 0 : 1)
+    }
+
+    private func navigateTo(href: String) {
+        guard let index = sectionIndex(for: href) else { return }
+        navigateTo(
+            sectionIndex: index,
+            anchor: href.split(separator: "#", maxSplits: 1).dropFirst().first.map(String.init)
+        )
+    }
+
+    private func navigateTo(sectionIndex index: Int, anchor: String?) {
+        sectionIndex = index
+        pendingAnchor = anchor
+        activePanel = nil
+        keepChromeVisible()
     }
 
     private func sectionIndex(for href: String) -> Int? {
