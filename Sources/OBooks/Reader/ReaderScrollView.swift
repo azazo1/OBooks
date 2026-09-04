@@ -322,7 +322,7 @@ final class ReaderScrollView: NSScrollView {
         interactivePageSettling = true
         let extent = pageExtent(for: transition.orientation, frame: transition.restingFrame)
         let threshold = interactiveThreshold(for: extent)
-        let shouldCommit = abs(transition.translation) >= threshold * 0.62
+        let shouldCommit = abs(transition.translation) >= threshold * 0.72
         let targetProgress = CGFloat(shouldCommit ? 1 : 0)
         let targetTranslation = shouldCommit
             ? -CGFloat(transition.direction) * threshold
@@ -418,7 +418,7 @@ final class ReaderScrollView: NSScrollView {
     }
 
     private func interactiveThreshold(for extent: CGFloat) -> CGFloat {
-        max(96, extent * 0.3)
+        max(96, extent * 0.32)
     }
 
     private func transitionTimingFunction() -> CAMediaTimingFunction {
