@@ -28,7 +28,7 @@ struct LibraryHomeView: View {
                     if continueBooks.isEmpty {
                         emptyShelf
                     } else {
-                        ScrollView(.horizontal) {
+                        ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 18) {
                                 ForEach(continueBooks) { book in
                                     ContinueBookCard(
@@ -41,7 +41,7 @@ struct LibraryHomeView: View {
                             }
                             .padding(.vertical, 4)
                         }
-                        .scrollIndicators(.hidden)
+                        .scrollIndicators(.never)
                     }
                 }
 
@@ -73,14 +73,17 @@ struct LibraryHomeView: View {
                             .foregroundStyle(OBooksPalette.secondaryText)
                             .padding(.vertical, 14)
                     } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 22)], alignment: .leading, spacing: 26) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 22)],
+                            alignment: .leading, spacing: 26
+                        ) {
                             ForEach(completedBooks) { book in
-                                    CompactBookCard(
-                                        book: book,
-                                        store: store,
-                                        onDelete: { onDelete(book) },
-                                        onToggleFinished: { onToggleFinished(book) }
-                                    ) { onOpen(book) }
+                                CompactBookCard(
+                                    book: book,
+                                    store: store,
+                                    onDelete: { onDelete(book) },
+                                    onToggleFinished: { onToggleFinished(book) }
+                                ) { onOpen(book) }
                             }
                         }
                     }
@@ -120,7 +123,9 @@ struct LibraryHomeView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.82))
             }
-            .buttonStyle(OBooksIconButtonStyle(size: 34, cornerRadius: 8, normalBackgroundOpacity: 0.08))
+            .buttonStyle(
+                OBooksIconButtonStyle(size: 34, cornerRadius: 8, normalBackgroundOpacity: 0.08)
+            )
             .help("导入 EPUB")
         }
     }
@@ -142,7 +147,9 @@ struct LibraryHomeView: View {
     }
 
     @ViewBuilder
-    private func shelfSection<Content: View>(title: String, showsChevron: Bool = false, @ViewBuilder content: () -> Content) -> some View {
+    private func shelfSection<Content: View>(
+        title: String, showsChevron: Bool = false, @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 7) {
                 Text(title)
@@ -376,7 +383,7 @@ struct BookCoverImage: View {
             Color(red: 0.24, green: 0.33, blue: 0.42),
             Color(red: 0.35, green: 0.25, blue: 0.28),
             Color(red: 0.28, green: 0.36, blue: 0.30),
-            Color(red: 0.39, green: 0.31, blue: 0.22)
+            Color(red: 0.39, green: 0.31, blue: 0.22),
         ]
         return colors[value % colors.count]
     }
