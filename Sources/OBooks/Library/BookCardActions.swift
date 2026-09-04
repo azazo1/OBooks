@@ -25,6 +25,7 @@ struct BookActionMenu: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .fixedSize()
         .help("图书操作")
     }
 }

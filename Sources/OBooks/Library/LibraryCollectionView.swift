@@ -32,7 +32,10 @@ struct LibraryCollectionView: View {
                 if books.isEmpty {
                     collectionEmptyState
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 28)], alignment: .leading, spacing: 30) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 28)],
+                        alignment: .leading, spacing: 30
+                    ) {
                         ForEach(books) { book in
                             CollectionBookCard(
                                 book: book,
@@ -78,32 +81,46 @@ private struct CollectionBookCard: View {
     let action: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        VStack(alignment: .leading, spacing: 3) {
             Button(action: action) {
-                VStack(alignment: .leading, spacing: 10) {
-                    BookCoverImage(book: book, store: store)
-                        .aspectRatio(0.68, contentMode: .fit)
-                        .frame(maxWidth: .infinity)
-                        .shadow(color: .black.opacity(0.28), radius: 7, y: 4)
+                BookCoverImage(book: book, store: store)
+                    .aspectRatio(0.68, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: .black.opacity(0.28), radius: 7, y: 4)
+            }
+            .buttonStyle(.plain)
+
+            HStack(alignment: .center, spacing: 8) {
+                Button(action: action) {
                     Text(book.title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.9))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+
+                BookActionMenu(onDelete: onDelete)
+                    .frame(width: 30, height: 26)
+            }
+            .padding(.top, 5)
+
+            HStack(alignment: .center, spacing: 8) {
+                Button(action: action) {
                     Text(book.authorLabel)
                         .font(.system(size: 11))
                         .foregroundStyle(OBooksPalette.secondaryText)
                         .lineLimit(1)
-                    ProgressView(value: book.progressFraction)
-                        .progressViewStyle(.linear)
-                        .tint(OBooksPalette.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
+                .buttonStyle(.plain)
 
-            BookActionMenu(onDelete: onDelete)
-                .padding(6)
+                Text("\(Int(book.progressFraction * 100))%")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(OBooksPalette.secondaryText)
+                    .frame(width: 30, alignment: .center)
+            }
         }
         .bookContextMenu(onDelete: onDelete)
     }
