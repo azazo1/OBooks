@@ -2,16 +2,13 @@ import SwiftUI
 
 @main
 struct OBooksApp: App {
+    @NSApplicationDelegateAdaptor(OBooksApplicationDelegate.self) private var applicationDelegate
     @StateObject private var appModel = AppModel()
 
     var body: some Scene {
         WindowGroup("OBooks") {
             LibraryView()
                 .environmentObject(appModel)
-                .background {
-                    PrimaryWindowConfigurator()
-                        .allowsHitTesting(false)
-                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultPosition(.center)
