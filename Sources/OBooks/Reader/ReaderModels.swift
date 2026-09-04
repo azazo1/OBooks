@@ -25,6 +25,7 @@ enum ReadingTheme: String, CaseIterable, Identifiable {
 enum ReaderAction: Equatable {
     case nextPage
     case previousPage
+    case seek(Double)
     case toggleSpeech
     case stopSpeech
 }

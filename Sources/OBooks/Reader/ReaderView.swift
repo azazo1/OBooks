@@ -475,10 +475,7 @@ struct ReaderView: View {
             .buttonStyle(.plain)
             .help("上一页")
 
-            ProgressView(value: progress)
-                .progressViewStyle(.linear)
-                .tint(OBooksPalette.accent)
-                .frame(width: 190)
+            readerProgressBar
 
             Text(progressLabel)
                 .font(.system(size: 10).monospacedDigit())
@@ -511,6 +508,39 @@ struct ReaderView: View {
         .opacity(chromeVisible ? 1 : 0)
         .allowsHitTesting(chromeVisible)
         .animation(.easeOut(duration: 0.18), value: chromeVisible)
+    }
+
+    private var readerProgressBar: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.16))
+                Capsule()
+                    .fill(OBooksPalette.accent)
+                    .frame(width: max(0, geometry.size.width * CGFloat(min(max(progress, 0), 1))))
+            }
+            .frame(height: 4)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.18), value: progress)
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { value in
+                        seekProgress(at: value.location.x, width: geometry.size.width)
+                    }
+                    .onEnded { value in
+                        seekProgress(at: value.location.x, width: geometry.size.width)
+                    }
+            )
+            .help("跳转到章节进度")
+        }
+        .frame(width: 190, height: 18)
+    }
+
+    private func seekProgress(at x: CGFloat, width: CGFloat) {
+        let normalizedX = min(max(x / max(width, 1), 0), 1)
+        controller.send(.seek(Double(normalizedX)))
+        keepChromeVisible()
     }
 
     private var noteEditor: some View {

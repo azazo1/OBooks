@@ -249,6 +249,8 @@ struct NativeReaderView: NSViewRepresentable {
                 scrollPage(direction: 1)
             case .previousPage:
                 scrollPage(direction: -1)
+            case .seek(let fraction):
+                seek(to: fraction)
             case .toggleSpeech:
                 if speech.isSpeaking {
                     stopSpeech()
@@ -421,6 +423,19 @@ struct NativeReaderView: NSViewRepresentable {
             let amount = max(240, clipView.bounds.height * 0.88)
             let next = min(maximum, max(0, current + CGFloat(direction) * amount))
             clipView.animator().setBoundsOrigin(NSPoint(x: 0, y: next))
+            scrollView.reflectScrolledClipView(clipView)
+        }
+
+        private func seek(to fraction: Double) {
+            guard let scrollView else { return }
+            let maximum = maximumScrollOffset()
+            let normalized = min(max(fraction, 0), 1)
+            let offset = CGFloat(normalized) * maximum
+            let clipView = scrollView.contentView
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                clipView.animator().setBoundsOrigin(NSPoint(x: 0, y: offset))
+            }
             scrollView.reflectScrolledClipView(clipView)
         }
 
