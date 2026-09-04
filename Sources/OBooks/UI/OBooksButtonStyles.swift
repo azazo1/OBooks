@@ -31,16 +31,3 @@ struct OBooksIconButtonStyle: ButtonStyle {
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
-
-struct OBooksSidebarButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(configuration.isPressed ? 0.08 : 0))
-                    .padding(.horizontal, 5)
-            }
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}

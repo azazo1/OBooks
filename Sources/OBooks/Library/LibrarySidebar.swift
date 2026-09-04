@@ -106,15 +106,11 @@ private struct SidebarRow: View {
             .padding(.horizontal, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 29)
-            .background {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selection == destination ? OBooksPalette.selected : .clear)
-                    .padding(.horizontal, 5)
-            }
+            .background(selection == destination ? OBooksPalette.selected : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .padding(.horizontal, 5)
             .contentShape(Rectangle())
         }
-        .buttonStyle(OBooksSidebarButtonStyle())
+        .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
