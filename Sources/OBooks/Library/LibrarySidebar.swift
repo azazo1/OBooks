@@ -104,10 +104,17 @@ private struct SidebarRow: View {
             }
             .foregroundStyle(selection == destination ? .white : .white.opacity(0.68))
             .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 29)
-            .background(selection == destination ? OBooksPalette.selected : .clear, in: RoundedRectangle(cornerRadius: 6))
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selection == destination ? OBooksPalette.selected : .clear)
+                    .padding(.horizontal, 5)
+            }
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 5)
+        .buttonStyle(OBooksSidebarButtonStyle())
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }

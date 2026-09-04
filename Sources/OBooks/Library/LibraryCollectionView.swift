@@ -109,7 +109,7 @@ private struct CollectionBookCard: View {
                     onToggleFinished: onToggleFinished,
                     onDelete: onDelete
                 )
-                    .frame(width: 30, height: 26)
+                    .frame(width: 34, height: 34)
             }
             .padding(.top, 5)
 

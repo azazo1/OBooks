@@ -119,10 +119,8 @@ struct LibraryHomeView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.82))
-                    .frame(width: 30, height: 30)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(OBooksIconButtonStyle(size: 34, cornerRadius: 8, normalBackgroundOpacity: 0.08))
             .help("导入 EPUB")
         }
     }

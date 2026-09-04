@@ -215,14 +215,13 @@ struct ReaderView: View {
                 readerButton(systemName: "magnifyingglass", help: "搜索书籍", panel: .search)
                 Button {
                     isBookmarked.toggle()
-                    activePanel = isBookmarked ? .bookmarks : activePanel
                 } label: {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(isBookmarked ? OBooksPalette.accent : .white.opacity(0.78))
                         .frame(width: 22, height: 26)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(OBooksIconButtonStyle())
                 .help(isBookmarked ? "移除本章书签" : "添加本章书签")
             }
             .frame(width: 136, alignment: .trailing)
@@ -250,7 +249,7 @@ struct ReaderView: View {
                 .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
                 .frame(width: 22, height: 26)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(OBooksIconButtonStyle())
         .help(help)
     }
 
@@ -263,7 +262,7 @@ struct ReaderView: View {
                 .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
                 .frame(width: 22, height: 26)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(OBooksIconButtonStyle())
         .help(help)
     }
 
@@ -403,7 +402,7 @@ struct ReaderView: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(OBooksPalette.secondaryText)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(OBooksIconButtonStyle(size: 26, cornerRadius: 7))
                 }
             }
             .padding(.horizontal, 10)
@@ -545,7 +544,7 @@ struct ReaderView: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .bold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(OBooksIconButtonStyle(size: 28, cornerRadius: 7))
             }
             Text(noteContext)
                 .font(.system(size: 11))
@@ -715,7 +714,7 @@ private struct ReaderFooter: View {
                     .foregroundStyle(isSpeaking ? OBooksPalette.accent : .white.opacity(0.72))
                     .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(OBooksIconButtonStyle())
             .help(isSpeaking ? "停止朗读" : "朗读当前章节")
 
             Button {
@@ -726,7 +725,7 @@ private struct ReaderFooter: View {
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(OBooksIconButtonStyle())
             .help("上一页")
 
             progressBar
@@ -749,7 +748,7 @@ private struct ReaderFooter: View {
                     .foregroundStyle(.white.opacity(0.72))
                     .frame(width: 24, height: 24)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(OBooksIconButtonStyle())
             .help("下一页")
         }
         .padding(.horizontal, 17)
