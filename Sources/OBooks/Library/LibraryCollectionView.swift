@@ -22,12 +22,6 @@ struct LibraryCollectionView: View {
                             .foregroundStyle(OBooksPalette.secondaryText)
                     }
                     Spacer()
-                    Button(action: onImport) {
-                        Label("导入 EPUB", systemImage: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(OBooksPalette.accent)
                 }
 
                 if books.isEmpty {
