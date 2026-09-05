@@ -1016,6 +1016,7 @@ struct NativeReaderView: NSViewRepresentable {
                   let book,
                   book.spine.indices.contains(index),
                   let textView,
+                  let scrollView,
                   let storage = textView.textStorage else { return }
             loadingAdjacentChapter = true
             defer { loadingAdjacentChapter = false }
@@ -1033,6 +1034,8 @@ struct NativeReaderView: NSViewRepresentable {
                     : NSAttributedString()
                 if prepend {
                     let previousLocation = firstVisibleCharacterLocation()
+                    let previousDocumentY = textView.documentY(forCharacter: previousLocation)
+                    let previousViewportY = scrollView.contentView.bounds.origin.y
                     let insertion = NSMutableAttributedString(attributedString: chapter.attributedText)
                     insertion.append(separator)
                     let insertionLength = insertion.length
@@ -1060,11 +1063,11 @@ struct NativeReaderView: NSViewRepresentable {
                     }
                     loadedBookStartIndex = index
                     updateDocumentLayout()
-                    scrollToCharacter(
-                        previousLocation + insertionLength,
-                        animated: false,
-                        locationIsGlobal: true
-                    )
+                    if let previousDocumentY,
+                       let nextDocumentY = textView.documentY(forCharacter: previousLocation + insertionLength) {
+                        let viewportDistance = previousDocumentY - previousViewportY
+                        scroll(to: nextDocumentY - viewportDistance, animated: false)
+                    }
                 } else {
                     if separator.length > 0 {
                         storage.append(separator)

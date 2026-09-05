@@ -98,6 +98,22 @@ final class ReaderPageNavigationTests: XCTestCase {
         XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
     }
 
+    func testBookScrollKeepsViewportWhenPrependingChapter() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.section = 1
+        reader.update(flow: .scrolling(scope: .book))
+        try await Task.sleep(for: .milliseconds(30))
+
+        let marker = "中文阅读与 English words 12345."
+        let text = reader.textView.string as NSString
+        let chapterStart = text.range(of: marker, options: .backwards)
+        XCTAssertNotEqual(chapterStart.location, NSNotFound)
+        let chapterStartY = try XCTUnwrap(reader.textView.documentY(forCharacter: chapterStart.location))
+        let viewportOffset = reader.scrollView.contentView.bounds.origin.y
+        XCTAssertEqual(chapterStartY - viewportOffset, 64, accuracy: 1)
+    }
+
     func testVerticalSwipeMovesBothPagesWithTheGesture() throws {
         let reader = try Fixture()
         defer { reader.close() }

@@ -124,6 +124,23 @@ final class ReaderTextView: NSTextView {
         return firstLocation
     }
 
+    func documentY(forCharacter location: Int) -> CGFloat? {
+        guard pageColumns == 0,
+              let layoutManager,
+              let textContainer else { return nil }
+        let length = (string as NSString).length
+        guard length > 0 else { return nil }
+        let clampedLocation = min(max(location, 0), length - 1)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: NSRange(location: clampedLocation, length: 1),
+            actualCharacterRange: nil
+        )
+        guard glyphRange.length > 0, glyphRange.location != NSNotFound else { return nil }
+        layoutManager.ensureLayout(for: textContainer)
+        let rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        return rect.minY + textContainerOrigin.y
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard pageColumns > 0 else {
             super.draw(dirtyRect)
