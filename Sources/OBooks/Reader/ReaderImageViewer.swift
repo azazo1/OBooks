@@ -38,10 +38,7 @@ struct ReaderImageViewer: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: visibleRect.width, height: visibleRect.height)
-                    .offset(
-                        x: visibleRect.midX - geometry.size.width / 2,
-                        y: visibleRect.midY - geometry.size.height / 2
-                    )
+                    .position(x: visibleRect.midX, y: visibleRect.midY)
                     .opacity(max(0.05, presentationProgress))
                     .allowsHitTesting(false)
 
@@ -99,8 +96,10 @@ struct ReaderImageViewer: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .overlay(alignment: .top) {
                 header(visibleRect: visibleRect, canvasWidth: geometry.size.width)
+                    .frame(width: geometry.size.width)
                     .opacity(presentationProgress)
             }
             .onAppear {
@@ -133,6 +132,7 @@ struct ReaderImageViewer: View {
                     }
                 }
                 .onHover { isTitleHovered = $0 }
+                .frame(maxWidth: .infinity)
             HStack(spacing: 10) {
                 Spacer()
                 Text("\(Int((zoom * 100).rounded()))%")
@@ -157,6 +157,7 @@ struct ReaderImageViewer: View {
                 .help("关闭图片预览")
             }
             .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 52)
