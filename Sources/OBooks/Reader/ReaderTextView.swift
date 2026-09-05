@@ -11,8 +11,9 @@ final class ReaderTextView: NSTextView {
     private var verticalInset: CGFloat = 52
     private var contextLocation = 0
     private var cursorTrackingArea: NSTrackingArea?
-    private var pageColumns = 1
-    private var pageViewportHeight: CGFloat = 0
+    private var pageColumns = 0
+    private(set) var pageViewportHeight: CGFloat = 0
+    private(set) var pageCount = 1
     private var pageColumnFrames: [NSRect] = []
     private var isUpdatingPageLayout = false
     private var selectionAnchorLocation: Int?
@@ -33,7 +34,7 @@ final class ReaderTextView: NSTextView {
 
     func updateDocumentHeight(minimumHeight: CGFloat) {
         guard let layoutManager, let textContainer, bounds.width > 0 else { return }
-        if pageColumns > 1 {
+        if pageColumns > 0 {
             updatePageLayout(minimumHeight: minimumHeight)
             return
         }
@@ -55,13 +56,19 @@ final class ReaderTextView: NSTextView {
     }
 
     func configurePageColumns(_ columns: Int, viewportHeight: CGFloat) {
-        let normalized = max(1, min(2, columns))
+        let normalized = max(0, min(2, columns))
         pageColumns = normalized
         pageViewportHeight = max(1, viewportHeight)
-        if normalized == 1 {
+        isVerticallyResizable = normalized == 0
+        if normalized == 0 {
             removeAdditionalTextContainers()
+            pageCount = 1
             textContainer?.widthTracksTextView = true
             textContainer?.heightTracksTextView = false
+            textContainer?.containerSize = NSSize(
+                width: max(1, bounds.width - textContainerInset.width * 2),
+                height: CGFloat.greatestFiniteMagnitude
+            )
             updateReadingInsets(for: bounds.width)
             return
         }
@@ -69,7 +76,7 @@ final class ReaderTextView: NSTextView {
     }
 
     func pageOffset(forCharacter location: Int) -> CGFloat? {
-        guard pageColumns > 1,
+        guard pageColumns > 0,
               let layoutManager,
               !pageColumnFrames.isEmpty else { return nil }
         for (index, container) in layoutManager.textContainers.enumerated() {
@@ -81,7 +88,7 @@ final class ReaderTextView: NSTextView {
                 actualGlyphRange: nil
             )
             if NSLocationInRange(location, characterRange) ||
-                location == NSMaxRange(characterRange) {
+                (location == (string as NSString).length && location == NSMaxRange(characterRange)) {
                 return pageColumnFrames[min(index, pageColumnFrames.count - 1)].minY - verticalInset
             }
         }
@@ -91,7 +98,7 @@ final class ReaderTextView: NSTextView {
     func visibleCharacterLocation() -> Int? {
         guard let layoutManager,
               let textContainer else { return nil }
-        if pageColumns == 1 {
+        if pageColumns == 0 {
             let origin = textContainerOrigin
             let visibleContainerRect = visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
             let glyphRange = layoutManager.glyphRange(
@@ -118,11 +125,16 @@ final class ReaderTextView: NSTextView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard pageColumns > 1,
+        guard pageColumns > 0 else {
+            super.draw(dirtyRect)
+            return
+        }
+        backgroundColor.setFill()
+        NSBezierPath(rect: dirtyRect).fill()
+        guard
               let layoutManager,
-              pageColumnFrames.count > 1 else { return }
-        for index in 1..<min(layoutManager.textContainers.count, pageColumnFrames.count) {
+              !pageColumnFrames.isEmpty else { return }
+        for index in 0..<min(layoutManager.textContainers.count, pageColumnFrames.count) {
             let frame = pageColumnFrames[index]
             guard frame.intersects(dirtyRect) else { continue }
             let container = layoutManager.textContainers[index]
@@ -142,23 +154,57 @@ final class ReaderTextView: NSTextView {
 
     override func scrollWheel(with event: NSEvent) {
         if let scrollView = enclosingScrollView as? ReaderScrollView {
-            scrollView.notifyUserScroll()
-            if scrollView.handlePageScroll(with: event) {
-                return
-            }
-            if scrollView.handleScrollWheel(with: event) {
-                return
-            }
+            scrollView.scrollWheel(with: event)
+            return
         }
         super.scrollWheel(with: event)
     }
 
+    override func keyDown(with event: NSEvent) {
+        guard pageColumns > 0,
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+              !event.modifierFlags.contains(.shift) || event.keyCode == 49,
+              let scrollView = enclosingScrollView as? ReaderScrollView else {
+            super.keyDown(with: event)
+            return
+        }
+        let direction: Int
+        switch event.keyCode {
+        case 49: direction = event.modifierFlags.contains(.shift) ? -1 : 1
+        case 123, 126, 116: direction = -1
+        case 124, 125, 121: direction = 1
+        default:
+            super.keyDown(with: event)
+            return
+        }
+        scrollView.turnPage(direction: direction)
+    }
+
+    override func scrollRangeToVisible(_ range: NSRange) {
+        if let offset = pageOffset(forCharacter: range.location),
+           let scrollView = enclosingScrollView as? ReaderScrollView {
+            scrollView.scroll(to: offset, animated: false)
+            return
+        }
+        super.scrollRangeToVisible(range)
+    }
+
     override func mouseDown(with event: NSEvent) {
+        if pageColumns > 0, event.clickCount == 1,
+           let scrollView = enclosingScrollView as? ReaderScrollView {
+            let point = convert(event.locationInWindow, from: nil)
+            let edge = min(44, textContainerInset.width)
+            if point.x < edge || point.x > bounds.width - edge {
+                window?.makeFirstResponder(self)
+                scrollView.turnPage(direction: point.x < edge ? -1 : 1)
+                return
+            }
+        }
         if event.clickCount == 1, let link = link(at: event) {
             onLink?(link)
             return
         }
-        guard pageColumns > 1,
+        guard pageColumns > 0,
               event.clickCount == 1,
               event.type == .leftMouseDown else {
             super.mouseDown(with: event)
@@ -172,7 +218,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard pageColumns > 1,
+        guard pageColumns > 0,
               isSelectingAcrossColumns,
               let anchor = selectionAnchorLocation else {
             super.mouseDragged(with: event)
@@ -187,7 +233,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard pageColumns > 1,
+        guard pageColumns > 0,
               isSelectingAcrossColumns else {
             super.mouseUp(with: event)
             return
@@ -362,84 +408,21 @@ final class ReaderTextView: NSTextView {
     }
 
     private func updatePageLayout(minimumHeight: CGFloat) {
-        guard !isUpdatingPageLayout,
-              pageColumns > 1,
-              let layoutManager,
-              let textContainer,
-              let textStorage else { return }
+        guard !isUpdatingPageLayout, pageColumns > 0,
+              let layoutManager, let textStorage else { return }
         isUpdatingPageLayout = true
         defer { isUpdatingPageLayout = false }
-
-        let viewportHeight = max(pageViewportHeight, minimumHeight, 1)
-        let horizontalInset = max(minimumHorizontalInset, (bounds.width - preferredReadingWidth) / 2)
-        let gap: CGFloat = 28
-        let availableWidth = max(240, bounds.width - horizontalInset * 2 - gap)
-        let columnWidth = availableWidth / 2
-        let columnHeight = max(120, viewportHeight - verticalInset * 2)
-        let fontSize = textStorage.length > 0
-            ? textStorage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
-            : nil
-        let charactersPerColumn = max(
-            260,
-            Int((columnWidth / max(fontSize?.pointSize ?? 18, 12)) * 27)
+        pageViewportHeight = max(1, minimumHeight)
+        let layout = ReaderPageLayout(
+            layoutManager: layoutManager, storage: textStorage,
+            viewport: NSSize(width: bounds.width, height: pageViewportHeight),
+            columns: pageColumns,
+            horizontalInset: textContainerInset.width, verticalInset: verticalInset
         )
-        let pageCount = max(
-            1,
-            Int(ceil(Double(max(textStorage.length, 1)) / Double(charactersPerColumn * 2))) + 1
-        )
-        let containerCount = pageCount * 2
-
-        removeAdditionalTextContainers()
-        textContainer.widthTracksTextView = false
-        textContainer.heightTracksTextView = false
-        textContainer.containerSize = NSSize(width: columnWidth, height: columnHeight)
-        for _ in 1..<containerCount {
-            let container = NSTextContainer(size: NSSize(width: columnWidth, height: columnHeight))
-            container.lineFragmentPadding = 0
-            layoutManager.addTextContainer(container)
-        }
-
-        for container in layoutManager.textContainers {
-            layoutManager.ensureLayout(for: container)
-        }
-        while let lastContainer = layoutManager.textContainers.last {
-            let lastRange = layoutManager.glyphRange(for: lastContainer)
-            let hasMoreGlyphs = lastRange.location != NSNotFound
-                && NSMaxRange(lastRange) < layoutManager.numberOfGlyphs
-            if hasMoreGlyphs {
-                for _ in 0..<2 {
-                    let container = NSTextContainer(size: NSSize(width: columnWidth, height: columnHeight))
-                    container.lineFragmentPadding = 0
-                    layoutManager.addTextContainer(container)
-                    layoutManager.ensureLayout(for: container)
-                }
-                continue
-            }
-            if layoutManager.textContainers.count > 2, lastRange.length == 0 {
-                layoutManager.removeTextContainer(at: layoutManager.textContainers.count - 1)
-                continue
-            }
-            break
-        }
-
-        let finalPageCount = max(1, Int(ceil(Double(layoutManager.textContainers.count) / 2)))
-
-        pageColumnFrames = (0..<layoutManager.textContainers.count).map { index in
-            let row = index / 2
-            let column = index % 2
-            return NSRect(
-                x: horizontalInset + CGFloat(column) * (columnWidth + gap),
-                y: verticalInset + CGFloat(row) * viewportHeight,
-                width: columnWidth,
-                height: columnHeight
-            )
-        }
-        let documentHeight = max(
-            viewportHeight,
-            CGFloat(finalPageCount) * viewportHeight + verticalInset * 2
-        )
-        if abs(frame.height - documentHeight) > 0.5 {
-            super.setFrameSize(NSSize(width: frame.width, height: documentHeight))
+        pageColumnFrames = layout.frames
+        pageCount = layout.pageCount
+        if abs(frame.height - layout.documentHeight) > 0.5 {
+            super.setFrameSize(NSSize(width: frame.width, height: layout.documentHeight))
         }
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
@@ -542,7 +525,7 @@ final class ReaderTextView: NSTextView {
 
     private func textContainerContext(at point: NSPoint) -> (NSTextContainer, NSPoint)? {
         guard let layoutManager else { return nil }
-        if pageColumns > 1 {
+        if pageColumns > 0 {
             if let (index, frame) = pageColumnFrames.enumerated().first(where: { $0.element.contains(point) }),
                layoutManager.textContainers.indices.contains(index) {
                 return (layoutManager.textContainers[index], frame.origin)

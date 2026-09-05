@@ -111,7 +111,7 @@ struct ReaderView: View {
     @State private var fontSize = 18.0
     @State private var lineHeight = 1.7
     @State private var margin = 56.0
-    @State private var flow: ReaderFlowMode = .scrolling(scope: .chapter)
+    @State private var flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)
     @State private var pageNumber = 1
     @State private var pageCount = 1
     @State private var activePanel: ReaderPanel?
@@ -134,7 +134,7 @@ struct ReaderView: View {
         _flow = State(
             initialValue: ReaderFlowMode(
                 preferenceValue: UserDefaults.standard.string(forKey: "reader.browsingMode") ?? ""
-            ) ?? .scrolling(scope: .chapter)
+            ) ?? .paging(orientation: .horizontal, columns: .single)
         )
         _pendingPosition = State(initialValue: Self.initialReadingPosition(for: book))
         _currentPosition = State(
@@ -224,11 +224,11 @@ struct ReaderView: View {
         }
         .overlay(alignment: .bottom) {
             if flow.isPaging {
-                Text("\(pageNumber)")
+                Text("\(pageNumber) / \(pageCount)")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.52))
+                    .foregroundStyle(theme == .paper ? .black.opacity(0.52) : .white.opacity(0.52))
                     .padding(.bottom, chromeVisible ? 58 : 18)
-                    .accessibilityLabel("第 \(pageNumber) 页, 共 \(pageCount) 页")
+                    .accessibilityLabel("本章第 \(pageNumber) 页, 共 \(pageCount) 页")
                     .allowsHitTesting(false)
             }
         }

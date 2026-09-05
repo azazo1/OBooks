@@ -1,0 +1,189 @@
+import AppKit
+import XCTest
+@testable import OBooks
+
+@MainActor
+final class ReaderPageNavigationTests: XCTestCase {
+    func testChapterBoundaryAndReverseTurnRestoreExactPage() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        XCTAssertFalse(reader.scrollView.turnPage(direction: -1, animated: false))
+        let firstText = reader.textView.string
+        let pages = reader.textView.pageCount
+        XCTAssertGreaterThan(pages, 1)
+        for page in 1..<pages {
+            XCTAssertTrue(reader.scrollView.turnPage(direction: 1, animated: false))
+            XCTAssertEqual(reader.scrollView.contentView.bounds.minY, CGFloat(page) * 600)
+        }
+        let lastLocation = reader.textView.visibleCharacterLocation()
+        XCTAssertTrue(reader.scrollView.turnPage(direction: 1, animated: false))
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+        XCTAssertEqual(reader.textView.pageCount, 1)
+        XCTAssertTrue(reader.scrollView.turnPage(direction: -1, animated: false))
+        XCTAssertEqual(reader.textView.string, firstText)
+        XCTAssertEqual(reader.textView.visibleCharacterLocation(), lastLocation)
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, CGFloat(pages - 1) * 600)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(reader.positions.last?.spineID, "chapter-0")
+    }
+
+    func testCancelledChapterSwipeDoesNotPublishPreviewAndIgnoresMomentum() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.scrollView.scroll(to: CGFloat(reader.textView.pageCount - 1) * 600, animated: false)
+        try await Task.sleep(for: .milliseconds(30))
+        let text = reader.textView.string
+        let location = reader.textView.visibleCharacterLocation()
+        reader.positions.removeAll()
+        reader.scrollView.handlePageScroll(with: try wheel(delta: -30, phase: .began, time: 1))
+        XCTAssertTrue(reader.scrollView.isPageTransitionActive)
+        XCTAssertEqual(reader.textView.pageCount, 1)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(reader.positions.isEmpty)
+        reader.scrollView.handlePageScroll(with: try wheel(delta: 0, phase: .cancelled, time: 1.1))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertFalse(reader.scrollView.isPageTransitionActive)
+        XCTAssertFalse(reader.textView.isHidden)
+        XCTAssertEqual(reader.textView.string, text)
+        XCTAssertEqual(reader.textView.visibleCharacterLocation(), location)
+        reader.scrollView.handlePageScroll(with: try wheel(delta: -300, phase: [], momentum: .began, time: 1.2))
+        XCTAssertEqual(reader.textView.visibleCharacterLocation(), location)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(reader.positions.last?.spineID, "chapter-0")
+    }
+
+    func testRapidTurnsCleanUpTransitionViews() throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        XCTAssertTrue(reader.scrollView.turnPage(direction: 1))
+        XCTAssertTrue(reader.scrollView.turnPage(direction: 1))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertFalse(reader.textView.isHidden)
+        XCTAssertFalse(reader.scrollView.subviews.contains { $0 is NSImageView })
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 1200)
+    }
+
+    func testResizeAndFontChangeKeepReadingAnchorOnVisiblePage() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        XCTAssertTrue(reader.scrollView.turnPage(direction: 1, animated: false))
+        let location = try XCTUnwrap(reader.textView.visibleCharacterLocation())
+        reader.scrollView.setFrameSize(NSSize(width: 760, height: 720))
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, reader.textView.pageOffset(forCharacter: location))
+        XCTAssertEqual(reader.textView.frame.height, CGFloat(reader.textView.pageCount) * 720)
+        let resizedLocation = try XCTUnwrap(reader.textView.visibleCharacterLocation())
+        reader.update(fontSize: 24)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, reader.textView.pageOffset(forCharacter: resizedLocation))
+        XCTAssertFalse(reader.positions.isEmpty)
+    }
+
+    func testSeekingAcrossChaptersSnapsToLastPageAndStopsAtBookEnd() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.coordinator.execute(.seek(1, animated: false))
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(reader.positions.last?.spineID, "chapter-2")
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, CGFloat(reader.textView.pageCount - 1) * 600)
+        XCTAssertFalse(reader.scrollView.turnPage(direction: 1, animated: false))
+    }
+
+    func testDirectoryNavigationToEarlierChapterStartsAtBeginning() throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.section = 2
+        reader.update()
+        reader.section = 0
+        reader.update()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+    }
+
+    func testVerticalSwipeMovesBothPagesWithTheGesture() throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.update(flow: .paging(orientation: .vertical, columns: .double))
+        reader.scrollView.turnPage(direction: 1, animated: false)
+        for direction: Int32 in [1, -1] {
+            reader.scrollView.handlePageScroll(with: try wheel(delta: 0, verticalDelta: -60 * direction, phase: .began, time: 1))
+            let images = reader.scrollView.subviews.compactMap { $0 as? NSImageView }
+            XCTAssertEqual(images.count, 2)
+            if images.count == 2 {
+                let upward: CGFloat = reader.scrollView.isFlipped ? -1 : 1
+                XCTAssertEqual(images[0].frame.minY, 60 * upward * CGFloat(direction), accuracy: 0.01)
+                XCTAssertEqual(images[1].frame.minY, -540 * upward * CGFloat(direction), accuracy: 0.01)
+            }
+            reader.scrollView.prepareForProgrammaticScroll()
+            XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 600)
+        }
+    }
+
+    private func wheel(delta: Int32, verticalDelta: Int32 = 0, phase: NSEvent.Phase, momentum: NSEvent.Phase = [], time: Double) throws -> NSEvent {
+        let event = try XCTUnwrap(CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+            wheel1: verticalDelta, wheel2: delta, wheel3: 0
+        ))
+        event.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+        event.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(momentum.rawValue))
+        event.timestamp = UInt64(time * 1_000_000_000)
+        return try XCTUnwrap(NSEvent(cgEvent: event))
+    }
+
+    @MainActor
+    private final class Fixture {
+        let coordinator = NativeReaderView.Coordinator()
+        let scrollView = ReaderScrollView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        let textView = ReaderTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        let book: BookSummary
+        var section = 0
+        var positions: [ReadingPosition] = []
+
+        init() throws {
+            book = BookSummary(
+                id: UUID(), title: "分页测试", authors: [], sortTitle: "test",
+                sourceFileName: "test.epub", folderName: "pagination-test-" + UUID().uuidString,
+                coverPath: nil,
+                spine: (0..<3).map { EPUBSpineItem(id: "chapter-\($0)", href: "\($0).xhtml", title: "\($0)", linear: true) },
+                toc: [], progressFraction: 0, lastOpenedAt: nil, importedAt: Date()
+            )
+            try FileManager.default.createDirectory(at: book.folderURL, withIntermediateDirectories: true)
+            for index in 0..<3 {
+                let paragraphs = String(repeating: "<p>中文阅读与 English words 12345.</p>", count: index == 1 ? 1 : 120)
+                try Data("<html><body>\(paragraphs)</body></html>".utf8)
+                    .write(to: book.folderURL.appendingPathComponent("\(index).xhtml"))
+            }
+            scrollView.wantsLayer = true
+            scrollView.layer?.masksToBounds = true
+            scrollView.borderType = .noBorder
+            textView.isEditable = false
+            textView.isHorizontallyResizable = false
+            textView.autoresizingMask = [.width]
+            textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            scrollView.documentView = textView
+            coordinator.attach(scrollView: scrollView, textView: textView)
+            update()
+        }
+
+        func update(fontSize: Double = 18, flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)) {
+            coordinator.update(
+                book: book, sectionIndex: section, pendingAnchor: nil, pendingPosition: nil,
+                pendingPositionAnimated: false, theme: .paper,
+                flow: flow,
+                fontSize: fontSize, lineHeight: 1.7, margin: 56, annotations: [],
+                onProgress: { [weak self] _, position in self?.positions.append(position) },
+                onBoundary: { _ in }, onSpeakingChanged: { _ in }, onAnnotation: { _, _, _ in },
+                onNoteRequest: { _, _ in },
+                onNavigate: { [weak self] index, _ in
+                    self?.section = index
+                    self?.update()
+                },
+                onAnchorConsumed: {}, onPositionConsumed: {}
+            )
+            coordinator.loadSectionIfNeeded()
+        }
+
+        func close() {
+            coordinator.teardown()
+            try? FileManager.default.removeItem(at: book.folderURL)
+        }
+    }
+}
