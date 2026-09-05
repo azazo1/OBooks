@@ -329,8 +329,6 @@ struct ReaderView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             activePanel = nil
-            activeImage = nil
-            activeImageRect = nil
         }
         .onReceive(controller.speech.$state) { state in
             if state.isActive { activeImage = nil; activeImageRect = nil }

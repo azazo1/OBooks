@@ -242,11 +242,12 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         private var lastDragPoint: NSPoint?
         private var startedOnImage = false
         private var isPanning = false
+        private var didPress = false
 
         override var isOpaque: Bool { false }
         override var isFlipped: Bool { true }
 
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }
 
         override func hitTest(_ point: NSPoint) -> NSView? {
             bounds.contains(point) ? self : nil
@@ -259,6 +260,7 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
             lastDragPoint = point
             startedOnImage = imageRect.contains(point)
             isPanning = false
+            didPress = true
             if event.clickCount == 2, startedOnImage {
                 onToggleZoom?()
             }
@@ -278,17 +280,21 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         }
 
         override func mouseUp(with event: NSEvent) {
-            guard isInteractive else { return }
-            let point = convert(event.locationInWindow, from: nil)
+            let pressed = didPress
             let panning = isPanning
+            let pressedOnImage = startedOnImage
             dragOrigin = nil
             lastDragPoint = nil
             isPanning = false
+            didPress = false
+            startedOnImage = false
+            guard isInteractive, pressed else { return }
+            let point = convert(event.locationInWindow, from: nil)
             if panning {
                 onPanEnd?()
                 return
             }
-            if event.clickCount == 1, !startedOnImage, !imageRect.contains(point) {
+            if event.clickCount == 1, !pressedOnImage, !imageRect.contains(point) {
                 onClose?()
             }
         }
