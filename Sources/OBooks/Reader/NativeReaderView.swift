@@ -197,9 +197,10 @@ struct NativeReaderView: NSViewRepresentable {
         private var sectionAnchors: [String: [String: Int]] = [:]
         private var loadedBookStartIndex = -1
         private var loadedBookEndIndex = -1
-        private var loadingAdjacentChapter = false
-        private var chapterDocuments: [Int: NativeChapterDocument] = [:]
-        private var updatingDocument = false
+    private var loadingAdjacentChapter = false
+    private var chapterDocuments: [Int: NativeChapterDocument] = [:]
+    private var updatingDocument = false
+    private let scrollNavigationRevealOffset: CGFloat = 72
         var lastCommandID: UUID?
 
         deinit {
@@ -355,7 +356,12 @@ struct NativeReaderView: NSViewRepresentable {
                let pendingAnchor,
                let location = anchorLocation(pendingAnchor),
                (currentSectionIndex == sectionIndex || loadedBookContent) {
-                scrollToCharacter(location, animated: true, locationIsGlobal: loadedBookContent)
+                scrollToCharacter(
+                    location,
+                    animated: true,
+                    locationIsGlobal: loadedBookContent,
+                    viewportOffset: settings.flow.isPaging ? 0 : scrollNavigationRevealOffset
+                )
                 consumePendingAnchor()
             }
             if positionChanged,
@@ -364,7 +370,11 @@ struct NativeReaderView: NSViewRepresentable {
                (currentSectionIndex == sectionIndex || loadedBookContent) {
                 if positionAnimated {
                     handleUserInteraction()
-                    scrollToReadingPosition(pendingPosition, animated: true)
+                    scrollToReadingPosition(
+                        pendingPosition,
+                        animated: true,
+                        revealBelowChrome: !settings.flow.isPaging
+                    )
                     consumePendingPosition()
                     return
                 }
@@ -397,7 +407,12 @@ struct NativeReaderView: NSViewRepresentable {
                     handleUserInteraction()
                     if let pendingAnchor,
                        let location = anchorLocation(pendingAnchor) {
-                        scrollToCharacter(location, animated: true, locationIsGlobal: true)
+                        scrollToCharacter(
+                            location,
+                            animated: true,
+                            locationIsGlobal: true,
+                            viewportOffset: settings.flow.isPaging ? 0 : scrollNavigationRevealOffset
+                        )
                         consumePendingAnchor()
                     } else {
                         if pendingAnchor != nil {
@@ -464,7 +479,12 @@ struct NativeReaderView: NSViewRepresentable {
                 applyAnnotations()
                 updateDocumentLayout()
                 if let pendingAnchor, let location = anchorLocation(pendingAnchor) {
-                    scrollToCharacter(location, animated: false, locationIsGlobal: loadedBookContent)
+                    scrollToCharacter(
+                        location,
+                        animated: false,
+                        locationIsGlobal: loadedBookContent,
+                        viewportOffset: settings.flow.isPaging ? 0 : scrollNavigationRevealOffset
+                    )
                     consumePendingAnchor()
                 } else if pendingAnchor != nil {
                     consumePendingAnchor()
@@ -472,7 +492,11 @@ struct NativeReaderView: NSViewRepresentable {
                           isPositionLoaded(positionBeingRestored) {
                     if pendingPositionAnimated {
                         handleUserInteraction()
-                        scrollToReadingPosition(positionBeingRestored, animated: true)
+                        scrollToReadingPosition(
+                            positionBeingRestored,
+                            animated: true,
+                            revealBelowChrome: !settings.flow.isPaging
+                        )
                     } else {
                         scrollToReadingPosition(positionBeingRestored, animated: false)
                         schedulePositionRestoration()
@@ -775,6 +799,14 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func scrollToReadingPosition(_ position: ReadingPosition, animated: Bool) {
+            scrollToReadingPosition(position, animated: animated, revealBelowChrome: false)
+        }
+
+        private func scrollToReadingPosition(
+            _ position: ReadingPosition,
+            animated: Bool,
+            revealBelowChrome: Bool
+        ) {
             let globalLocation: Int
             if loadedBookContent, let range = sectionRanges[position.spineID] {
                 globalLocation = range.location + position.characterOffset
@@ -785,7 +817,9 @@ struct NativeReaderView: NSViewRepresentable {
                 globalLocation,
                 animated: animated,
                 locationIsGlobal: true,
-                viewportOffset: CGFloat(position.viewportOffset ?? 0)
+                viewportOffset: revealBelowChrome
+                    ? scrollNavigationRevealOffset
+                    : CGFloat(position.viewportOffset ?? 0)
             )
         }
 
