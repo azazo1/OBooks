@@ -12,6 +12,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
     var toc: [EPUBTOCItem]
     var progressFraction: Double
     var readingPosition: ReadingPosition?
+    var bookmarks: [ReaderBookmark]
     var isFinished: Bool
     var lastOpenedAt: Date?
     let importedAt: Date
@@ -32,7 +33,8 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         lastOpenedAt: Date?,
         importedAt: Date,
         isFinished: Bool = false,
-        readingPosition: ReadingPosition? = nil
+        readingPosition: ReadingPosition? = nil,
+        bookmarks: [ReaderBookmark] = []
     ) {
         self.id = id
         self.title = title
@@ -46,6 +48,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         self.progressFraction = progressFraction
         self.isFinished = isFinished
         self.readingPosition = readingPosition
+        self.bookmarks = bookmarks
         self.lastOpenedAt = lastOpenedAt
         self.importedAt = importedAt
     }
@@ -62,6 +65,17 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         !isFinished && progressFraction >= Self.finishPromptThreshold
     }
 
+    mutating func toggleBookmark(at position: ReadingPosition, title: String, progressFraction: Double) {
+        if let index = bookmarks.firstIndex(where: { $0.matches(position) }) {
+            bookmarks.remove(at: index)
+        } else {
+            bookmarks.insert(
+                ReaderBookmark(position: position, title: title, progressFraction: progressFraction),
+                at: 0
+            )
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -74,6 +88,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         case toc
         case progressFraction
         case readingPosition
+        case bookmarks
         case isFinished
         case lastOpenedAt
         case importedAt
@@ -92,6 +107,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         toc = try container.decode([EPUBTOCItem].self, forKey: .toc)
         progressFraction = try container.decode(Double.self, forKey: .progressFraction)
         readingPosition = try? container.decodeIfPresent(ReadingPosition.self, forKey: .readingPosition)
+        bookmarks = try container.decodeIfPresent([ReaderBookmark].self, forKey: .bookmarks) ?? []
         isFinished = try container.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
         lastOpenedAt = try container.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         importedAt = try container.decode(Date.self, forKey: .importedAt)
@@ -110,6 +126,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         try container.encode(toc, forKey: .toc)
         try container.encode(progressFraction, forKey: .progressFraction)
         try container.encodeIfPresent(readingPosition, forKey: .readingPosition)
+        try container.encode(bookmarks, forKey: .bookmarks)
         try container.encode(isFinished, forKey: .isFinished)
         try container.encodeIfPresent(lastOpenedAt, forKey: .lastOpenedAt)
         try container.encode(importedAt, forKey: .importedAt)

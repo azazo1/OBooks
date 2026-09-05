@@ -31,6 +31,41 @@ final class ReaderPageNavigationTests: XCTestCase {
         try await assertScrollPositionSurvivesReopening(scope: .chapter)
     }
 
+    func testBookmarkReturnsToFixedPositionAfterMovingAcrossChapters() async throws {
+        for flow in [
+            ReaderFlowMode.paging(orientation: .horizontal, columns: .single),
+            .scrolling(scope: .chapter),
+            .scrolling(scope: .book)
+        ] {
+            let reader = try Fixture(flow: flow)
+            defer { reader.close() }
+            reader.scrollView.scroll(to: flow.isPaging ? 1200 : 1407.25, animated: false)
+            try await Task.sleep(for: .milliseconds(30))
+            let position = try XCTUnwrap(reader.positions.last)
+            let bookmark = ReaderBookmark(position: position, title: "第一章", progressFraction: 0.1)
+            let offset = reader.scrollView.contentView.bounds.minY
+
+            reader.scrollView.scroll(to: offset + 600, animated: false)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertFalse(bookmark.matches(try XCTUnwrap(reader.positions.last)))
+            reader.section = 2
+            reader.pendingPosition = ReadingPosition(spineID: "chapter-2", characterOffset: 900)
+            reader.update(flow: flow)
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(reader.positions.last?.spineID, "chapter-2")
+
+            reader.section = 0
+            reader.pendingPosition = bookmark.position
+            reader.update(flow: flow)
+            try await Task.sleep(for: .milliseconds(30))
+
+            XCTAssertEqual(bookmark.position, position)
+            XCTAssertEqual(reader.positions.last?.spineID, bookmark.position.spineID)
+            XCTAssertEqual(reader.positions.last?.characterOffset, bookmark.position.characterOffset)
+            XCTAssertEqual(reader.scrollView.contentView.bounds.minY, offset, accuracy: 0.5)
+        }
+    }
+
     func testOpeningSavedBookScrollPositionDoesNotDrift() async throws {
         try await assertScrollPositionSurvivesReopening(scope: .book)
     }

@@ -181,6 +181,20 @@ final class AppModel: ObservableObject {
         scheduleProgressSave()
     }
 
+    func toggleBookmark(bookID: UUID, position: ReadingPosition, title: String, progressFraction: Double) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].toggleBookmark(at: position, title: title, progressFraction: progressFraction)
+        libraryStore.save(books)
+        logger.info("更新书签: book=\(bookID), count=\(self.books[index].bookmarks.count)")
+    }
+
+    func removeBookmark(bookID: UUID, bookmarkID: UUID) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].bookmarks.removeAll { $0.id == bookmarkID }
+        libraryStore.save(books)
+        logger.info("移除书签: book=\(bookID), bookmark=\(bookmarkID)")
+    }
+
     func toggleFinished(for bookID: UUID) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else {
             return

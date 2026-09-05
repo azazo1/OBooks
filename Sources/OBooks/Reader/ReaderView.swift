@@ -79,6 +79,7 @@ struct ReaderView: View {
     @State private var pendingPosition: ReadingPosition?
     @State private var pendingPositionAnimated = false
     @State private var currentPosition: ReadingPosition?
+    @State private var currentProgressFraction = 0.0
     @State private var jumpBackPosition: ReadingPosition?
     @State private var progressState = ReaderProgressState()
     @State private var theme: ReadingTheme = .focus
@@ -90,7 +91,6 @@ struct ReaderView: View {
     @State private var pageCount = 1
     @State private var activePanel: ReaderPanel?
     @State private var currentTOCEntryID: UUID?
-    @State private var isBookmarked = false
     @State private var searchQuery = ""
     @State private var isSpeaking = false
     @State private var chromeVisible = true
@@ -108,6 +108,7 @@ struct ReaderView: View {
         self.tocIndex = tocIndex
         let initialSectionIndex = Self.initialSectionIndex(for: book)
         _sectionIndex = State(initialValue: initialSectionIndex)
+        _currentProgressFraction = State(initialValue: book.progressFraction)
         _flow = State(
             initialValue: ReaderFlowMode(
                 preferenceValue: UserDefaults.standard.string(forKey: "reader.browsingMode") ?? ""
@@ -151,6 +152,7 @@ struct ReaderView: View {
                     let overall = flow.scrollScope == .book || flow.isPaging
                         ? min(1, max(0, value))
                         : min(1, Double(currentIndex) / count + value / count)
+                    currentProgressFraction = overall
                     if flow.scrollScope == .book || flow.isPaging {
                         sectionIndex = currentIndex
                     }
@@ -288,7 +290,13 @@ struct ReaderView: View {
                 readerButton(systemName: "book.pages", help: "打开浏览模式", panel: .flow)
                 readerButton(systemName: "magnifyingglass", help: "搜索书籍", panel: .search)
                 Button {
-                    isBookmarked.toggle()
+                    guard let currentPosition,
+                        let index = book.spine.firstIndex(where: { spineIdentity($0) == currentPosition.spineID })
+                    else { return }
+                    appModel.toggleBookmark(
+                        bookID: book.id, position: currentPosition,
+                        title: book.spine[index].title, progressFraction: currentProgressFraction
+                    )
                 } label: {
                     Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                         .font(.system(size: 15, weight: .medium))
@@ -296,7 +304,8 @@ struct ReaderView: View {
                         .frame(width: 22, height: 26)
                 }
                 .buttonStyle(OBooksIconButtonStyle())
-                .help(isBookmarked ? "移除本章书签" : "添加本章书签")
+                .disabled(currentPosition == nil || pendingPosition != nil || pendingAnchor != nil)
+                .help(isBookmarked ? "移除当前位置书签" : "添加当前位置书签")
             }
             .frame(width: 136, alignment: .trailing)
         }
@@ -387,33 +396,53 @@ struct ReaderView: View {
         .onExitCommand { activePanel = nil }
     }
 
+    private var bookmarks: [ReaderBookmark] {
+        appModel.books.first(where: { $0.id == book.id })?.bookmarks ?? book.bookmarks
+    }
+
+    private var isBookmarked: Bool {
+        guard let currentPosition else { return false }
+        return bookmarks.contains { $0.matches(currentPosition) }
+    }
+
     private var bookmarkContent: some View {
-        VStack(spacing: 0) {
-            if isBookmarked {
-                Button {
-                    activePanel = nil
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "bookmark.fill")
-                            .foregroundStyle(OBooksPalette.accent)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(currentChapterTitle)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.primary)
-                            Text("当前位置")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                if bookmarks.isEmpty {
+                    panelEmpty(icon: "bookmark", title: "无书签", message: "点击顶栏书签图标添加")
+                } else {
+                    ForEach(bookmarks) { bookmark in
+                        Button {
+                            registerJump()
+                            navigateTo(position: bookmark.position)
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "bookmark.fill")
+                                    .foregroundStyle(OBooksPalette.accent)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(bookmark.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Text(bookmark.progressFraction, format: .percent.precision(.fractionLength(1)))
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .padding(14)
+                            .contentShape(Rectangle())
                         }
-                        Spacer()
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("移除书签", systemImage: "trash") {
+                                appModel.removeBookmark(bookID: book.id, bookmarkID: bookmark.id)
+                            }
+                        }
                     }
-                    .padding(14)
                 }
-                .buttonStyle(.plain)
-            } else {
-                panelEmpty(icon: "bookmark", title: "无书签", message: "点击顶栏书签图标添加")
             }
-            Spacer()
         }
+        .scrollIndicators(.hidden)
     }
 
     private var highlightsContent: some View {
@@ -723,11 +752,6 @@ struct ReaderView: View {
         colorScheme == .dark ? .black : Color(nsColor: .windowBackgroundColor)
     }
 
-    private var currentChapterTitle: String {
-        guard book.spine.indices.contains(sectionIndex) else { return "当前位置" }
-        return book.spine[sectionIndex].title
-    }
-
     private static func initialSectionIndex(for book: BookSummary) -> Int {
         if let position = book.readingPosition,
             let index = book.spine.firstIndex(where: { Self.spineIdentity($0) == position.spineID })
@@ -827,6 +851,10 @@ struct ReaderView: View {
     private func undoJump() {
         guard let position = jumpBackPosition else { return }
         jumpBackPosition = nil
+        navigateTo(position: position)
+    }
+
+    private func navigateTo(position: ReadingPosition) {
         guard let index = book.spine.firstIndex(where: { spineIdentity($0) == position.spineID }) else {
             return
         }
