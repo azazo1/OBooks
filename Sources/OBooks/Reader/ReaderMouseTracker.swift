@@ -30,8 +30,13 @@ struct ReaderMouseTracker: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            removeMonitor()
-            guard window != nil else { return }
+            removeTracking()
+            guard let window else { return }
+            for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(fullScreenDidChange(_:)), name: name, object: window
+                )
+            }
             applyChromeVisibility()
             eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
                 self?.handle(event)
@@ -40,19 +45,26 @@ struct ReaderMouseTracker: NSViewRepresentable {
         }
 
         deinit {
-            removeMonitor()
+            removeTracking()
         }
 
-        func applyChromeVisibility() {
+        func applyChromeVisibility(animated: Bool = true) {
             guard let window else { return }
+            let isFullScreen = window.styleMask.contains(.fullScreen)
+            // 全屏标题栏由 macOS 显隐, 阅读工具栏不能把其中的窗口按钮变透明.
+            let buttonsVisible = isFullScreen || chromeVisible
             let buttonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
+                context.duration = animated && !isFullScreen ? 0.18 : 0
                 for type in buttonTypes {
                     guard let button = window.standardWindowButton(type) else { continue }
-                    button.animator().alphaValue = chromeVisible ? 1 : 0
+                    button.animator().alphaValue = buttonsVisible ? 1 : 0
                 }
             }
+        }
+
+        @objc private func fullScreenDidChange(_ notification: Notification) {
+            applyChromeVisibility(animated: false)
         }
 
         private func handle(_ event: NSEvent) {
@@ -71,7 +83,8 @@ struct ReaderMouseTracker: NSViewRepresentable {
             onProximityChange?(value)
         }
 
-        private func removeMonitor() {
+        private func removeTracking() {
+            NotificationCenter.default.removeObserver(self)
             if let eventMonitor {
                 NSEvent.removeMonitor(eventMonitor)
                 self.eventMonitor = nil

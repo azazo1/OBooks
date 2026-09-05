@@ -117,7 +117,7 @@ final class AppModel: ObservableObject {
         hostingController.sizingOptions = [.minSize]
 
         let initialSize = NSSize(width: 1180, height: 760)
-        let window = NSWindow(
+        let window = ReaderWindow(
             contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
