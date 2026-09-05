@@ -4,6 +4,7 @@ import SwiftUI
 struct OBooksApp: App {
     @NSApplicationDelegateAdaptor(OBooksApplicationDelegate.self) private var applicationDelegate
     @StateObject private var appModel = AppModel()
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup("OBooks") {
@@ -19,6 +20,11 @@ struct OBooksApp: App {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
             }
+            CommandGroup(replacing: .appInfo) {
+                Button("关于 OBooks") {
+                    openWindow(id: "about")
+                }
+            }
             CommandMenu("阅读") {
                 Button("打开选中书籍") {
                     appModel.openSelectedBook()
@@ -26,5 +32,11 @@ struct OBooksApp: App {
                 .keyboardShortcut(.return, modifiers: [.command])
             }
         }
+
+        Window("关于 OBooks", id: "about") {
+            AppAboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }

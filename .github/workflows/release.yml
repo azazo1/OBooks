@@ -173,12 +173,47 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  test:
+    name: 运行测试
+    needs: version
+    runs-on: macos-15
+    steps:
+      - name: 检出目标提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: 检查 Apple 工具链
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
+
+      - name: 恢复 SwiftPM 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-swift-test-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-test-
+
+      - name: 运行测试
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test
+
   release:
     name: 创建 GitHub Release
     if: needs.version.outputs.is_release == 'true'
     needs:
       - version
       - build
+      - test
     runs-on: ubuntu-latest
     permissions:
       contents: write
