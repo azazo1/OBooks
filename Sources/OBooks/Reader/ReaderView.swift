@@ -98,6 +98,7 @@ struct ReaderView: View {
     @State private var currentTOCEntryID: UUID?
     @State private var searchQuery = ""
     @State private var isSpeaking = false
+    @State private var speechOverlayRect = CGRect.zero
     @State private var chromeVisible = true
     @State private var isPointerNearChrome = false
     @State private var hideChromeTask: Task<Void, Never>?
@@ -153,6 +154,7 @@ struct ReaderView: View {
                 margin: margin,
                 annotations: annotations,
                 controller: controller,
+                speechOverlayRect: speechOverlayRect,
                 onProgress: { value, position in
                     currentPosition = position
                     let count = Double(max(book.spine.count, 1))
@@ -163,9 +165,7 @@ struct ReaderView: View {
                         ? min(1, max(0, value))
                         : min(1, Double(currentIndex) / count + value / count)
                     currentProgressFraction = overall
-                    if flow.scrollScope == .book || flow.isPaging {
-                        sectionIndex = currentIndex
-                    }
+                    sectionIndex = currentIndex
                     let displayValue = flow.scrollScope == .chapter && !flow.isPaging ? value : overall
                     progressState.update(displayValue, persistValue: overall, position: position)
                 },
@@ -208,6 +208,7 @@ struct ReaderView: View {
                     removeAnnotation(id: id)
                 },
                 onImageClick: { image, rect in
+                    guard !controller.speech.state.isActive else { return }
                     activeImage = image
                     activeImageRect = rect
                     hideChromeTask?.cancel()
@@ -248,6 +249,12 @@ struct ReaderView: View {
             }
         }
         .overlay {
+            SpeechPlayerOverlay(session: controller.speech, controller: controller,
+                book: book, theme: theme, flow: flow) { rect in
+                if speechOverlayRect != rect { speechOverlayRect = rect }
+            }
+        }
+        .overlay {
             ReaderMouseTracker(
                 chromeVisible: chromeVisible,
                 edgeThreshold: 88,
@@ -270,6 +277,7 @@ struct ReaderView: View {
         .ignoresSafeArea(.container, edges: .top)
         .background(chromeBackground)
         .onAppear {
+            controller.speech.playbackOwner = appModel.speechPlaybackOwner
             progressState.configure { fraction, position in
                 appModel.updateProgress(bookID: book.id, fraction: fraction, position: position)
             }
@@ -307,7 +315,11 @@ struct ReaderView: View {
             activeImage = nil
             activeImageRect = nil
         }
+        .onReceive(controller.speech.$state) { state in
+            if state.isActive { activeImage = nil; activeImageRect = nil }
+        }
         .onDisappear {
+            controller.speech.stop()
             activePanel = nil
             activeImage = nil
             activeImageRect = nil
@@ -315,7 +327,9 @@ struct ReaderView: View {
             progressState.flush()
         }
         .onExitCommand {
-            if activePanel != nil {
+            if controller.speech.isExpanded {
+                controller.speech.isExpanded = false
+            } else if activePanel != nil {
                 activePanel = nil
             } else {
                 NSApp.keyWindow?.performClose(nil)
@@ -1170,7 +1184,7 @@ private struct ReaderFooter: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(OBooksIconButtonStyle())
-            .help(isSpeaking ? "停止朗读" : "朗读当前章节")
+            .help(isSpeaking ? "暂停朗读" : "开始或继续朗读")
 
             Button {
                 controller.send(.previousPage)

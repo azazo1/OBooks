@@ -15,6 +15,7 @@ struct NativeReaderView: NSViewRepresentable {
     let margin: Double
     let annotations: [ReaderAnnotation]
     @ObservedObject var controller: ReaderController
+    var speechOverlayRect: NSRect = .zero
     let onProgress: (Double, ReadingPosition) -> Void
     var onTOCSelection: (UUID?) -> Void = { _ in }
     let onPageInfo: (Int, Int) -> Void
@@ -31,7 +32,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onPositionConsumed: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(speech: controller.speech)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -105,6 +106,7 @@ struct NativeReaderView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.speechBridge.overlayRect = speechOverlayRect
         coordinator.update(
             book: book,
             sectionIndex: sectionIndex,
@@ -134,8 +136,8 @@ struct NativeReaderView: NSViewRepresentable {
         )
         coordinator.loadSectionIfNeeded()
         if coordinator.lastCommandID != controller.command?.id, let command = controller.command {
-            coordinator.execute(command.action)
             coordinator.lastCommandID = command.id
+            Task { @MainActor [weak coordinator] in coordinator?.execute(command.action) }
         }
     }
 
@@ -154,7 +156,8 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private let loader = NativeChapterLoader()
-        private let speech = SpeechService()
+        let speechBridge: ReaderSpeechBridge
+        private var speech: SpeechSession { speechBridge.session }
         private let logger = Logger(subsystem: "com.obooks.app", category: "reader.native")
         private weak var scrollView: NSScrollView?
         private weak var textView: ReaderTextView?
@@ -172,8 +175,6 @@ struct NativeReaderView: NSViewRepresentable {
         private var loadedSettings: Settings?
         private var annotations: [ReaderAnnotation] = []
         private var renderedAnnotationRanges: [(id: UUID, range: NSRange, kind: String)] = []
-        private var speechRange: NSRange?
-        private var speechBaseLocation = 0
         private var onProgress: (Double, ReadingPosition) -> Void = { _, _ in }
         private var onTOCSelection: (UUID?) -> Void = { _ in }
         private var onPageInfo: (Int, Int) -> Void = { _, _ in }
@@ -207,6 +208,11 @@ struct NativeReaderView: NSViewRepresentable {
     private let scrollNavigationRevealOffset: CGFloat = 72
         var lastCommandID: UUID?
 
+        init(speech: SpeechSession? = nil) {
+            speechBridge = ReaderSpeechBridge(session: speech ?? SpeechSession())
+            super.init()
+        }
+
         deinit {
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
@@ -221,8 +227,18 @@ struct NativeReaderView: NSViewRepresentable {
             self.textView = textView
             isTornDown = false
             if let readerScrollView = scrollView as? ReaderScrollView {
+                speechBridge.attach(textView: textView, scrollView: readerScrollView)
+                speechBridge.resolveRange = { [weak self] in self?.speechDocumentRange($0) }
+                speechBridge.reveal = { [weak self] in self?.revealSpeechPosition($0) }
+                speechBridge.restoreAnnotations = { [weak self] in self?.applyAnnotations() }
+                speechBridge.highlightColor = { [weak self] in
+                    NativeReaderAppearance(theme: self?.settings.theme ?? .focus).speechHighlight
+                }
+                speechBridge.onSpeakingChanged = { [weak self] in self?.notifySpeakingChanged($0) }
+                speech.pageForSentence = { [weak self] index in self?.speechSentencePage(index) }
                 readerScrollView.onUserScroll = { [weak self] in
                     self?.handleUserInteraction()
+                    self?.speechBridge.follow.userInteraction()
                 }
                 readerScrollView.pageTurn = { [weak self] direction in
                     guard let self else { return nil }
@@ -230,6 +246,7 @@ struct NativeReaderView: NSViewRepresentable {
                     return self.preparePageTurn(direction: direction)
                 }
                 readerScrollView.onPageTurnCompleted = { [weak self] in
+                    if self?.speech.state.isActive == true { self?.speechBridge.refresh(followPosition: true) }
                     self?.reportProgress()
                 }
                 readerScrollView.onViewportSizeChanged = { [weak self] location, viewportOffset in
@@ -245,6 +262,7 @@ struct NativeReaderView: NSViewRepresentable {
                         )
                     }
                     self.updatingDocument = false
+                    self.speechBridge.refresh()
                     self.reportProgress()
                 }
             }
@@ -315,6 +333,9 @@ struct NativeReaderView: NSViewRepresentable {
             let nextSettings = Settings(theme: theme, flow: flow, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
             let settingsChanged = settings != nextSettings
             let sectionChanged = lastInputSectionIndex != sectionIndex
+            if sectionChanged, lastInputSectionIndex != nil, currentSectionIndex != sectionIndex {
+                speechBridge.follow.userInteraction()
+            }
             if settingsChanged || sectionChanged
                 || self.pendingAnchor != pendingAnchor || self.pendingPosition != pendingPosition {
                 (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
@@ -323,6 +344,24 @@ struct NativeReaderView: NSViewRepresentable {
             if settingsChanged { chapterDocuments.removeAll() }
             if self.book?.id != book.id {
                 tocIndex = ReaderTOCIndex(spine: book.spine, items: book.toc)
+                speech.configure(
+                    spineIDs: book.spine.map { $0.id.isEmpty ? $0.href : $0.id },
+                    title: { index in
+                        guard book.spine.indices.contains(index) else { return "" }
+                        func findTitle(_ items: [EPUBTOCItem]) -> String? {
+                            for item in items {
+                                if item.href.split(separator: "#").first.map(String.init) == book.spine[index].href { return item.label }
+                                if let title = findTitle(item.children) { return title }
+                            }
+                            return nil
+                        }
+                        return findTitle(book.toc) ?? "第 \(index + 1) 章"
+                    },
+                    loadText: { [weak self] index in
+                        guard let self else { throw CocoaError(.fileReadUnknown) }
+                        return try self.chapterDocument(at: index).attributedText.string
+                    }
+                )
             }
             self.book = book
             if sectionChanged { requestedSectionIndex = sectionIndex }
@@ -357,9 +396,11 @@ struct NativeReaderView: NSViewRepresentable {
             self.onPositionConsumed = onPositionConsumed
             if annotationsChanged {
                 applyAnnotations()
+                speechBridge.refresh()
             }
             if anchorChanged {
                 handleUserInteraction()
+                speechBridge.follow.userInteraction()
             }
             if anchorChanged,
                let pendingAnchor,
@@ -379,6 +420,7 @@ struct NativeReaderView: NSViewRepresentable {
                (currentSectionIndex == sectionIndex || loadedBookContent) {
                 if positionAnimated {
                     handleUserInteraction()
+                    speechBridge.follow.userInteraction()
                     scrollToReadingPosition(
                         pendingPosition,
                         animated: true,
@@ -447,7 +489,7 @@ struct NativeReaderView: NSViewRepresentable {
                 positionBeingRestored = pendingPosition
                 isRestoringPosition = true
             }
-            stopSpeech()
+            clearSpeechRange()
             let appearance = NativeReaderAppearance(theme: settings.theme)
             do {
                 let loaded = try loadContent(book: book, appearance: appearance)
@@ -526,6 +568,7 @@ struct NativeReaderView: NSViewRepresentable {
                     scrollView.reflectScrolledClipView(scrollView.contentView)
                 }
                 reportProgress()
+                speechBridge.refresh()
             } catch {
                 logger.error("加载原生章节失败: section=\(self.requestedSectionIndex), error=\(error.localizedDescription, privacy: .public)")
                 textView.string = "无法显示这一章\n\n\(error.localizedDescription)"
@@ -535,23 +578,30 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         func execute(_ action: ReaderAction) {
+            guard !isTornDown else { return }
             handleUserInteraction()
             switch action {
             case .nextPage:
+                speechBridge.follow.userInteraction()
                 turnPage(direction: 1)
             case .previousPage:
+                speechBridge.follow.userInteraction()
                 turnPage(direction: -1)
             case .seek(let fraction, let animated):
+                speechBridge.follow.userInteraction()
                 (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
                 seek(to: fraction, animated: animated)
             case .toggleSpeech:
-                if speech.isSpeaking {
-                    stopSpeech()
-                } else {
+                if speech.state == .idle {
                     startSpeech(at: firstVisibleCharacterLocation())
-                }
+                } else { speech.toggle() }
             case .stopSpeech:
                 stopSpeech()
+            case .speechSentence(let index): speech.playSentence(index)
+            case .speechStep(let direction, let paragraph): speech.step(direction, byParagraph: paragraph)
+            case .speechRate(let rate): speech.setRate(rate)
+            case .speechVoice(let voice): speech.setVoice(voice)
+            case .revealSpeech: speechBridge.follow.resumeNow()
             }
         }
 
@@ -582,11 +632,7 @@ struct NativeReaderView: NSViewRepresentable {
             onPositionConsumed = {}
             pendingProgress = nil
             pendingReadingPosition = nil
-            speech.onRange = nil
-            speech.onFinished = nil
-            speech.onStateChanged = nil
-            speech.stop()
-            speechRange = nil
+            speechBridge.teardown()
             renderedAnnotationRanges.removeAll()
             sectionRanges.removeAll()
             sectionIndices.removeAll()
@@ -835,58 +881,126 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func startSpeech(at location: Int) {
-            guard let textView else { return }
-            let fullText = textView.string as NSString
-            let start = min(max(location, 0), fullText.length)
-            guard start < fullText.length else { return }
-            speechBaseLocation = start
-            speech.onRange = { [weak self] range in
-                guard let self else { return }
-                self.showSpeechRange(NSRange(location: self.speechBaseLocation + range.location, length: range.length))
-            }
-            speech.onStateChanged = { [weak self] speaking in
-                self?.notifySpeakingChanged(speaking)
-                if !speaking {
-                    self?.clearSpeechRange()
+            guard let book, book.spine.indices.contains(currentSectionIndex) else { return }
+            if loadedBookContent {
+                for (identity, range) in sectionRanges where NSLocationInRange(location, range) {
+                    if let index = sectionIndices[identity] {
+                        speech.start(section: index, offset: location - range.location)
+                        return
+                    }
                 }
             }
-            speech.onFinished = { [weak self] in
-                self?.clearSpeechRange()
-            }
-            speech.speak(text: fullText.substring(from: start))
+            speech.start(section: currentSectionIndex, offset: location)
         }
 
         private func stopSpeech() {
-            speech.onRange = nil
-            speech.onFinished = nil
-            speech.onStateChanged = nil
             speech.stop()
-            notifySpeakingChanged(false)
             clearSpeechRange()
         }
 
         func showSpeechRange(_ range: NSRange) {
-            guard let textView, let layoutManager = textView.layoutManager else { return }
-            clearSpeechRange()
-            let validRange = NSIntersectionRange(range, NSRange(location: 0, length: textView.string.utf16.count))
-            guard validRange.length > 0 else { return }
-            layoutManager.addTemporaryAttribute(
-                .backgroundColor,
-                value: NativeReaderAppearance(theme: settings.theme).speechHighlight,
-                forCharacterRange: validRange
-            )
-            speechRange = validRange
-            // 分页的额外文本容器没有关联视图, 临时属性变化需要显式触发重绘.
-            textView.needsDisplay = true
-            textView.scrollRangeToVisible(validRange)
+            revealLoadedSpeechRange(range)
+            speechBridge.highlight(range)
         }
 
         private func clearSpeechRange() {
-            guard let range = speechRange, let textView, let layoutManager = textView.layoutManager else { return }
-            layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
-            speechRange = nil
-            applyAnnotations()
-            textView.needsDisplay = true
+            speechBridge.clearHighlight()
+        }
+
+        private func speechDocumentRange(_ position: SpeechPosition) -> NSRange? {
+            if loadedBookContent {
+                guard let section = sectionRanges[position.spineID] else { return nil }
+                return NSRange(location: section.location + position.range.location, length: position.range.length)
+            }
+            guard currentSectionIndex == position.sectionIndex else { return nil }
+            return position.range
+        }
+
+        private func speechSentencePage(_ index: Int) -> Int? {
+            guard settings.flow.isPaging, speech.sentences.indices.contains(index),
+                  let book, book.spine.indices.contains(speech.sectionIndex), let textView, let scrollView else { return nil }
+            let position = SpeechPosition(sectionIndex: speech.sectionIndex,
+                spineID: spineIdentity(book.spine[speech.sectionIndex]), range: speech.sentences[index].range)
+            if let range = speechDocumentRange(position), let offset = textView.pageOffset(forCharacter: range.location) {
+                return Int((offset / max(1, scrollView.contentSize.height)).rounded()) + 1
+            }
+            guard let document = try? chapterDocument(at: position.sectionIndex) else { return nil }
+            let measurement = ReaderTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+            measurement.isVerticallyResizable = true
+            measurement.isHorizontallyResizable = false
+            measurement.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            measurement.preferredReadingWidth = textView.preferredReadingWidth
+            measurement.setReadingInsets(horizontal: max(34, settings.margin), vertical: max(64, settings.margin))
+            measurement.textStorage?.setAttributedString(document.attributedText)
+            measurement.configurePageColumns(settings.flow.pageColumns.rawValue, viewportHeight: scrollView.contentSize.height)
+            guard let offset = measurement.pageOffset(forCharacter: position.range.location) else { return nil }
+            return Int((offset / max(1, scrollView.contentSize.height)).rounded()) + 1
+        }
+
+        private func revealSpeechPosition(_ position: SpeechPosition) {
+            guard !isTornDown, !updatingDocument,
+                  let scrollView = scrollView as? ReaderScrollView,
+                  !scrollView.isPageTransitionActive else { return }
+            if let range = speechDocumentRange(position) {
+                revealLoadedSpeechRange(range)
+                return
+            }
+            guard let book, book.spine.indices.contains(position.sectionIndex) else { return }
+            let oldIndex = currentSectionIndex
+            do {
+                let document = try chapterDocument(at: position.sectionIndex)
+                scrollView.transitionContent(direction: position.sectionIndex >= oldIndex ? 1 : -1) { [self] in
+                    updatingDocument = true
+                    defer { updatingDocument = false }
+                    installPageChapter(document, at: position.sectionIndex)
+                    if settings.flow.scrollScope == .book {
+                        loadedBookContent = true
+                        loadedBookStartIndex = position.sectionIndex
+                        loadedBookEndIndex = position.sectionIndex
+                        sectionRanges = [position.spineID: NSRange(location: 0, length: document.attributedText.length)]
+                        sectionIndices = [position.spineID: position.sectionIndex]
+                        sectionAnchors = [position.spineID: document.anchors]
+                    }
+                    scrollToCharacter(position.range.location, animated: false, locationIsGlobal: true,
+                        viewportOffset: settings.flow.isPaging ? 0 : 100)
+                    speechBridge.refresh()
+                    // 自动导航始终提交, 用户手势的取消仍使用原有的回滚入口.
+                    return ReaderPageTurn(rollback: {})
+                }
+            } catch {
+                logger.error("朗读定位失败: chapter=\(position.sectionIndex + 1), error=\(error.localizedDescription)")
+            }
+        }
+
+        private func revealLoadedSpeechRange(_ range: NSRange) {
+            guard let textView, let scrollView = scrollView as? ReaderScrollView,
+                  range.location < textView.string.utf16.count,
+                  !scrollView.isPageTransitionActive else { return }
+            if let target = textView.pageOffset(forCharacter: range.location) {
+                let current = scrollView.contentView.bounds.minY
+                guard abs(target - current) > 1 else { return }
+                scrollView.transitionContent(direction: target > current ? 1 : -1) { [weak scrollView] in
+                    scrollView?.scroll(to: target, animated: false)
+                    return ReaderPageTurn(rollback: {})
+                }
+                return
+            }
+            guard let y = textView.documentY(forCharacter: range.location) else { return }
+            let viewport = scrollView.contentView.bounds
+            var top: CGFloat = 76
+            var bottom = viewport.height - 64
+            let overlay = speechBridge.overlayRect
+            if !overlay.isEmpty {
+                let above = overlay.minY - 12 - top
+                let below = bottom - overlay.maxY - 12
+                if above >= below { bottom = min(bottom, overlay.minY - 12) }
+                else { top = max(top, overlay.maxY + 12) }
+            }
+            let lineHeight = CGFloat(settings.fontSize * settings.lineHeight)
+            let localY = y - viewport.minY
+            guard localY < top || localY + lineHeight > bottom else { return }
+            let anchor = top + max(0, bottom - top - lineHeight) / 3
+            scrollView.scroll(to: y - anchor, animated: true, forSpeech: true)
         }
 
         private func applyAnnotations() {
@@ -1075,7 +1189,7 @@ struct NativeReaderView: NSViewRepresentable {
 
         private func installPageChapter(_ document: NativeChapterDocument, at index: Int) {
             guard let textView else { return }
-            stopSpeech()
+            clearSpeechRange()
             renderedAnnotationRanges.removeAll()
             textView.textStorage?.setAttributedString(document.attributedText)
             currentSectionIndex = index
@@ -1209,6 +1323,7 @@ struct NativeReaderView: NSViewRepresentable {
                 let separator = storage.length > 0
                     ? NSAttributedString(string: "\n\n")
                     : NSAttributedString()
+                clearSpeechRange()
                 if prepend {
                     let previousLocation = firstVisibleCharacterLocation()
                     let previousDocumentY = textView.documentY(forCharacter: previousLocation)
@@ -1264,6 +1379,7 @@ struct NativeReaderView: NSViewRepresentable {
                     updateDocumentLayout()
                 }
                 applyAnnotations()
+                speechBridge.refresh()
                 logger.info("按需加载相邻章节: chapter=\(index + 1)/\(book.spine.count, privacy: .public), prepend=\(prepend, privacy: .public)")
             } catch {
                 logger.error("按需加载章节失败: section=\(index), error=\(error.localizedDescription, privacy: .public)")

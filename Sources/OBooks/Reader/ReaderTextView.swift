@@ -10,6 +10,8 @@ final class ReaderTextView: NSTextView {
     var onSpeak: ((Int) -> Void)?
     var onLink: ((URL) -> Void)?
     var onImageClick: ((NSImage, NSRect) -> Void)?
+    var allowsImagePreview = true
+    var onSpeechInteraction: ((Bool) -> Void)?
     var preferredReadingWidth: CGFloat = 820
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
@@ -194,6 +196,9 @@ final class ReaderTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        let navigates = [49, 115, 116, 119, 121, 123, 124, 125, 126].contains(Int(event.keyCode))
+        if navigates { onSpeechInteraction?(true) }
+        defer { if navigates { onSpeechInteraction?(false) } }
         guard pageColumns > 0,
               event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
               !event.modifierFlags.contains(.shift) || event.keyCode == 49,
@@ -232,7 +237,12 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        onSpeechInteraction?(true)
+        defer {
+            if !isSelectingPageText, pendingImageHit == nil { onSpeechInteraction?(false) }
+        }
         if event.clickCount == 1, let hit = imageHit(at: event) {
+            guard allowsImagePreview else { return }
             pendingImageHit = hit
             return
         }
@@ -282,6 +292,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        onSpeechInteraction?(true)
         pendingImageHit = nil
         guard pageColumns > 0,
               isSelectingPageText,
@@ -298,9 +309,10 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        defer { onSpeechInteraction?(false) }
         if event.clickCount == 1, let hit = pendingImageHit {
             pendingImageHit = nil
-            onImageClick?(hit.image, hit.rect)
+            if allowsImagePreview { onImageClick?(hit.image, hit.rect) }
             return
         }
         pendingImageHit = nil
@@ -403,7 +415,7 @@ final class ReaderTextView: NSTextView {
         let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
         guard characterIndex < textStorage.length,
               textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil else {
-            if imageHit(at: event) != nil {
+            if allowsImagePreview, imageHit(at: event) != nil {
                 NSCursor.pointingHand.set()
             }
             return

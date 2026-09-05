@@ -9,11 +9,13 @@ struct ReaderPageTurn {
 @MainActor
 final class ReaderScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
+    var onScrollInteractionChanged: ((Bool) -> Void)?
     var pageTurn: ((Int) -> ReaderPageTurn?)?
     var onPageTurnCompleted: (() -> Void)?
     var onViewportSizeChanged: ((Int?, CGFloat?) -> Void)?
     private(set) var pageFlow: ReaderFlowMode = .scrolling(scope: .chapter)
     private var scrollTargetY: CGFloat?
+    private var speechScroll = false
     private var refreshLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
     private var transition: PageTransition?
@@ -33,11 +35,12 @@ final class ReaderScrollView: NSScrollView {
         let orientation: ReaderPageOrientation
         let turn: ReaderPageTurn
         let documentWasHidden: Bool
+        let isSpeech: Bool
         var settlement: Bool?
 
         init(oldView: NSImageView, newView: NSImageView, frame: NSRect,
              direction: Int, orientation: ReaderPageOrientation,
-             turn: ReaderPageTurn, documentWasHidden: Bool) {
+             turn: ReaderPageTurn, documentWasHidden: Bool, isSpeech: Bool) {
             self.oldView = oldView
             self.newView = newView
             self.frame = frame
@@ -45,6 +48,7 @@ final class ReaderScrollView: NSScrollView {
             self.orientation = orientation
             self.turn = turn
             self.documentWasHidden = documentWasHidden
+            self.isSpeech = isSpeech
         }
 
         var extent: CGFloat { orientation == .horizontal ? frame.width : frame.height }
@@ -85,6 +89,13 @@ final class ReaderScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if event.phase.contains(.began) || event.momentumPhase.contains(.began) {
+            onScrollInteractionChanged?(true)
+        }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended) {
+            onScrollInteractionChanged?(false)
+        }
         onUserScroll?()
         if handlePageScroll(with: event) || handleScrollWheel(with: event) { return }
         super.scrollWheel(with: event)
@@ -194,16 +205,33 @@ final class ReaderScrollView: NSScrollView {
         return true
     }
 
-    func scroll(to offset: CGFloat, animated: Bool) {
+    func scroll(to offset: CGFloat, animated: Bool, forSpeech: Bool = false) {
         let maximum = max(0, (documentView?.frame.height ?? 0) - contentView.bounds.height)
         let target = min(max(offset, 0), maximum)
-        guard animated, !pageFlow.isPaging else {
+        guard animated, !pageFlow.isPaging, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             stopSmoothScroll()
             setScrollOffset(target)
             return
         }
         scrollTargetY = target
+        speechScroll = forSpeech
         startDisplayLink()
+    }
+
+    func interruptSpeechNavigation() {
+        if speechScroll { stopSmoothScroll() }
+        if let transition, transition.isSpeech { completeTransition(transition, commit: true) }
+    }
+
+    func transitionContent(direction: Int, update: @escaping () -> ReaderPageTurn?) {
+        prepareForProgrammaticScroll()
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            _ = update()
+            onPageTurnCompleted?()
+            return
+        }
+        guard let transition = beginTransition(direction: direction, update: update) else { return }
+        settle(transition, commit: true)
     }
 
     func prepareForProgrammaticScroll() {
@@ -214,12 +242,12 @@ final class ReaderScrollView: NSScrollView {
         }
     }
 
-    private func beginTransition(direction: Int) -> PageTransition? {
+    private func beginTransition(direction: Int, update: (() -> ReaderPageTurn?)? = nil) -> PageTransition? {
         guard transition == nil, !preparingPage else { return nil }
         stopSmoothScroll()
         let before = snapshotImage()
         preparingPage = true
-        guard let turn = pageTurn?(direction) else {
+        guard let turn = update?() ?? (update == nil ? pageTurn?(direction) : nil) else {
             preparingPage = false
             return nil
         }
@@ -233,8 +261,8 @@ final class ReaderScrollView: NSScrollView {
         let newView = imageView(after)
         let transition = PageTransition(
             oldView: oldView, newView: newView, frame: bounds,
-            direction: direction, orientation: pageFlow.pageOrientation ?? .horizontal,
-            turn: turn, documentWasHidden: documentView?.isHidden ?? false
+            direction: direction, orientation: pageFlow.pageOrientation ?? .vertical,
+            turn: turn, documentWasHidden: documentView?.isHidden ?? false, isSpeech: update != nil
         )
         let frames = transition.frames(progress: 0)
         oldView.frame = frames.old
@@ -334,6 +362,7 @@ final class ReaderScrollView: NSScrollView {
         refreshLink?.invalidate()
         refreshLink = nil
         scrollTargetY = nil
+        speechScroll = false
         lastFrameTimestamp = nil
     }
 }

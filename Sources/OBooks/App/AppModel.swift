@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var alert: AppAlert?
 
     let libraryStore: LibraryStore
+    let speechPlaybackOwner = SpeechPlaybackOwner()
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
     private var readerWindows: [UUID: NSWindow] = [:]
     private var readerDelegates: [UUID: ReaderWindowDelegate] = [:]

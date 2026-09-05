@@ -60,6 +60,26 @@ final class ReaderSpeechHighlightTests: XCTestCase {
         }
     }
 
+    func testProgrammaticSpeechTurnUsesAnimationForBothDirectionsAndColumns() throws {
+        for columns in [1, 2] {
+            for orientation in ReaderPageOrientation.allCases {
+                let fixture = Fixture(columns: columns)
+                defer { fixture.close() }
+                fixture.scrollView.configure(flow: .paging(orientation: orientation, columns: columns == 1 ? .single : .double))
+                let manager = try XCTUnwrap(fixture.textView.layoutManager)
+                let range = manager.characterRange(forGlyphRange: manager.glyphRange(for: manager.textContainers[columns]), actualGlyphRange: nil)
+                fixture.coordinator.showSpeechRange(NSRange(location: range.location, length: 3))
+                XCTAssertTrue(fixture.scrollView.isPageTransitionActive || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+                fixture.scrollView.prepareForProgrammaticScroll()
+                XCTAssertEqual(fixture.scrollView.contentView.bounds.minY, 600)
+                XCTAssertFalse(fixture.textView.isHidden)
+                fixture.coordinator.showSpeechRange(NSRange(location: 0, length: 3))
+                fixture.scrollView.prepareForProgrammaticScroll()
+                XCTAssertEqual(fixture.scrollView.contentView.bounds.minY, 0)
+            }
+        }
+    }
+
     @MainActor
     private final class Fixture {
         let coordinator = NativeReaderView.Coordinator()

@@ -217,6 +217,61 @@ final class ReaderPageNavigationTests: XCTestCase {
         }
     }
 
+    func testSpeechCrossChapterKeepsAudioAndDisablesPreviewUntilStopped() async throws {
+        for flow: ReaderFlowMode in [.paging(orientation: .horizontal, columns: .double), .scrolling(scope: .chapter)] {
+            let engine = FakeSpeechEngine()
+            let session = SpeechSession(engine: engine)
+            let reader = try Fixture(flow: flow, speech: session)
+            defer { reader.close() }
+            session.start(section: 1)
+            for _ in 0..<100 where engine.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+            XCTAssertEqual(session.state, .playing)
+            XCTAssertFalse(reader.textView.allowsImagePreview)
+            XCTAssertTrue(reader.scrollView.isPageTransitionActive || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            reader.scrollView.prepareForProgrammaticScroll()
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(reader.positions.last?.spineID, "chapter-1")
+            XCTAssertFalse(reader.textView.isHidden)
+            session.pause()
+            XCTAssertFalse(reader.textView.allowsImagePreview)
+            reader.section = 2
+            reader.update(flow: flow)
+            XCTAssertEqual(session.sectionIndex, 1)
+            XCTAssertEqual(session.state, .paused)
+            reader.coordinator.execute(.revealSpeech)
+            reader.scrollView.prepareForProgrammaticScroll()
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(reader.positions.last?.spineID, "chapter-1")
+            session.stop()
+            XCTAssertTrue(reader.textView.allowsImagePreview)
+        }
+    }
+
+    func testSpeechSurvivesReflowAndMapsPositionAfterPrepending() async throws {
+        let engine = FakeSpeechEngine()
+        let session = SpeechSession(engine: engine)
+        let flow = ReaderFlowMode.scrolling(scope: .book)
+        let reader = try Fixture(position: ReadingPosition(spineID: "chapter-1", characterOffset: 0), flow: flow, speech: session)
+        defer { reader.close() }
+        session.start(section: 1)
+        for _ in 0..<100 where engine.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        reader.scrollView.prepareForProgrammaticScroll()
+        let originalPosition = try XCTUnwrap(session.position)
+        reader.scrollView.scroll(to: 0, animated: false)
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertGreaterThan(reader.textView.string.utf16.count, 100)
+        reader.section = 1
+        reader.update(fontSize: 24, flow: flow)
+        XCTAssertEqual(session.state, .playing)
+        XCTAssertEqual(session.position, originalPosition)
+        XCTAssertEqual(engine.calls.count, 1)
+        let call = try XCTUnwrap(engine.calls.last)
+        engine.onEvent?(.range(call.id, NSRange(location: 0, length: 2)))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(session.position?.spineID, "chapter-1")
+        XCTAssertEqual(session.position?.range.location, 0)
+    }
+
     private func wheel(delta: Int32, verticalDelta: Int32 = 0, phase: NSEvent.Phase, momentum: NSEvent.Phase = [], time: Double) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(
             scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
@@ -230,7 +285,7 @@ final class ReaderPageNavigationTests: XCTestCase {
 
     @MainActor
     private final class Fixture {
-        let coordinator = NativeReaderView.Coordinator()
+        let coordinator: NativeReaderView.Coordinator
         let scrollView = ReaderScrollView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         let textView = ReaderTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         let window: NSWindow
@@ -241,8 +296,10 @@ final class ReaderPageNavigationTests: XCTestCase {
 
         init(
             position: ReadingPosition? = nil,
-            flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)
+            flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single),
+            speech: SpeechSession? = nil
         ) throws {
+            coordinator = NativeReaderView.Coordinator(speech: speech)
             _ = NSApplication.shared
             window = NSWindow(contentRect: scrollView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false

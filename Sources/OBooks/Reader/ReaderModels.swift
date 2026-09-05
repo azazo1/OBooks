@@ -134,6 +134,11 @@ enum ReaderAction: Equatable {
     case seek(Double, animated: Bool)
     case toggleSpeech
     case stopSpeech
+    case speechSentence(Int)
+    case speechStep(Int, paragraph: Bool)
+    case speechRate(Double)
+    case speechVoice(String)
+    case revealSpeech
 }
 
 struct ReaderAnnotation: Identifiable, Equatable, Codable, Hashable {
