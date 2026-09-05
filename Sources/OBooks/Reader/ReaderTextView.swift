@@ -206,6 +206,15 @@ final class ReaderTextView: NSTextView {
         super.scrollRangeToVisible(range)
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard pageColumns > 0 else { return super.hitTest(point) }
+        let localPoint = convert(point, from: superview)
+        guard !isHiddenOrHasHiddenAncestor,
+              visibleRect.contains(localPoint) else { return nil }
+        // 原生命中仅覆盖第一个文本容器, 分页绘制的其余栏和空白也需要接收事件.
+        return super.hitTest(point) ?? self
+    }
+
     override func mouseDown(with event: NSEvent) {
         if pageColumns > 0, event.clickCount == 1,
            let scrollView = enclosingScrollView as? ReaderScrollView {
@@ -231,15 +240,7 @@ final class ReaderTextView: NSTextView {
             super.mouseDown(with: event)
             return
         }
-        guard let location = selectableCharacterLocation(for: event) else {
-            let length = (string as NSString).length
-            let current = min(max(selectedRange().location, 0), length)
-            setSelectedRange(NSRange(location: current, length: 0))
-            selectionAnchorLocation = nil
-            isSelectingAcrossColumns = false
-            needsDisplay = true
-            return
-        }
+        let location = characterLocation(for: event)
         selectionAnchorLocation = location
         isSelectingAcrossColumns = true
         window?.makeFirstResponder(self)
@@ -531,23 +532,6 @@ final class ReaderTextView: NSTextView {
         return layoutManager.characterIndexForGlyph(
             at: max(containerGlyphRange.location, glyphIndex)
         )
-    }
-
-    private func selectableCharacterLocation(for event: NSEvent) -> Int? {
-        guard let layoutManager else { return nil }
-        let point = convert(event.locationInWindow, from: nil)
-        guard let (textContainer, origin) = textContainerContext(at: point) else { return nil }
-        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
-        let glyphRange = layoutManager.glyphRange(for: textContainer)
-        guard glyphRange.length > 0, glyphRange.location != NSNotFound else { return nil }
-        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
-        guard glyphIndex >= glyphRange.location, glyphIndex < NSMaxRange(glyphRange) else { return nil }
-        let glyphRect = layoutManager.boundingRect(
-            forGlyphRange: NSRange(location: glyphIndex, length: 1),
-            in: textContainer
-        )
-        guard glyphRect.insetBy(dx: -1, dy: -1).contains(containerPoint) else { return nil }
-        return layoutManager.characterIndexForGlyph(at: glyphIndex)
     }
 
     private func characterBoundary(
