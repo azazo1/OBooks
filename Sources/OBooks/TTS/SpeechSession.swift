@@ -30,6 +30,8 @@ final class SpeechSession: ObservableObject {
     @Published private(set) var voiceIdentifier = ""
     @Published private(set) var errorMessage: String?
     @Published var isExpanded = false
+    @Published private(set) var isMinimized = false
+    var isPlayerVisible: Bool { state != .idle && !isMinimized }
     private(set) var position: SpeechPosition?
     var onPosition: ((SpeechPosition) -> Void)?
     var onStateChanged: ((SpeechPlaybackState) -> Void)?
@@ -71,12 +73,22 @@ final class SpeechSession: ObservableObject {
     }
 
     func start(section: Int, offset: Int = 0) {
+        restorePlayer()
         playbackOwner?.activate(self)
         load(section: section, offset: offset, autoplay: true)
     }
 
     func toggle() {
         if state.isPlaying { pause() } else { resume() }
+    }
+
+    func minimizePlayer() {
+        guard state != .idle else { return }
+        isMinimized = true
+    }
+
+    func restorePlayer() {
+        isMinimized = false
     }
 
     func pause() {
@@ -120,6 +132,7 @@ final class SpeechSession: ObservableObject {
         position = nil
         indexes.removeAll()
         isExpanded = false
+        isMinimized = false
         errorMessage = nil
         setState(.idle)
         logger.info("停止朗读")

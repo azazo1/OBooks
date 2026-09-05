@@ -16,7 +16,7 @@ struct SpeechPlayerOverlay: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if session.state != .idle {
+            if session.isPlayerVisible {
                 let size = CGSize(width: min(420, geometry.size.width - 32),
                     height: session.isExpanded ? min(510, geometry.size.height * 0.8) : 84)
                 let origin = playerOrigin(container: geometry.size, size: size)
@@ -42,8 +42,8 @@ struct SpeechPlayerOverlay: View {
             }
         }
         .coordinateSpace(name: "speechPlayerWindow")
-        .onChange(of: session.state) { _, state in
-            if state == .idle { onFrameChange(.zero) }
+        .onChange(of: session.isPlayerVisible) { _, visible in
+            if !visible { onFrameChange(.zero) }
         }
         .onChange(of: session.rate, initial: true) { _, rate in draftRate = rate }
         .onChange(of: session.isExpanded) { _, expanded in
@@ -72,6 +72,7 @@ struct SpeechPlayerOverlay: View {
             playButton(size: 34)
             control("forward.end.fill", "下一句") { controller.send(.speechStep(1, paragraph: false)) }
                 .disabled(session.sentences.isEmpty)
+            control("minus", "最小化朗读播放器") { session.minimizePlayer() }
             control("stop.fill", "停止朗读") { controller.send(.stopSpeech) }
         }
         .padding(.horizontal, 10)
@@ -88,6 +89,7 @@ struct SpeechPlayerOverlay: View {
                 }
                 Spacer(minLength: 0)
                 control("chevron.down", "收起播放器") { session.isExpanded = false }
+                control("minus", "最小化朗读播放器") { session.minimizePlayer() }
                 control("stop.fill", "停止朗读") { controller.send(.stopSpeech) }
             }
 

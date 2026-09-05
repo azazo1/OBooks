@@ -318,6 +318,12 @@ struct ReaderView: View {
         .onReceive(controller.speech.$state) { state in
             if state.isActive { activeImage = nil; activeImageRect = nil }
         }
+        .onReceive(controller.speech.$isMinimized) { minimized in
+            if minimized {
+                keepChromeVisible()
+                scheduleChromeHide(after: .seconds(2))
+            }
+        }
         .onDisappear {
             controller.speech.stop()
             activePanel = nil
@@ -327,7 +333,7 @@ struct ReaderView: View {
             progressState.flush()
         }
         .onExitCommand {
-            if controller.speech.isExpanded {
+            if controller.speech.isPlayerVisible, controller.speech.isExpanded {
                 controller.speech.isExpanded = false
             } else if activePanel != nil {
                 activePanel = nil
@@ -790,6 +796,7 @@ struct ReaderView: View {
     private var readerFooter: some View {
         ReaderFooter(
             progressState: progressState,
+            speech: controller.speech,
             isSpeaking: isSpeaking,
             flow: flow,
             chromeBackground: chromeBackground,
@@ -1163,6 +1170,7 @@ struct ReaderView: View {
 
 private struct ReaderFooter: View {
     @ObservedObject var progressState: ReaderProgressState
+    @ObservedObject var speech: SpeechSession
     let isSpeaking: Bool
     let flow: ReaderFlowMode
     let chromeBackground: Color
@@ -1176,15 +1184,20 @@ private struct ReaderFooter: View {
     var body: some View {
         HStack(spacing: 14) {
             Button {
-                controller.send(.toggleSpeech)
+                if speech.isMinimized {
+                    speech.restorePlayer()
+                } else {
+                    controller.send(.toggleSpeech)
+                }
             } label: {
-                Image(systemName: isSpeaking ? "pause.fill" : "speaker.wave.2")
+                Image(systemName: speech.isMinimized ? "pip.enter" : isSpeaking ? "pause.fill" : "speaker.wave.2")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(isSpeaking ? OBooksPalette.accent : .white.opacity(0.72))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(OBooksIconButtonStyle())
-            .help(isSpeaking ? "暂停朗读" : "开始或继续朗读")
+            .help(speech.isMinimized ? "显示朗读播放器" : isSpeaking ? "暂停朗读" : "开始或继续朗读")
+            .accessibilityLabel(speech.isMinimized ? "显示朗读播放器" : isSpeaking ? "暂停朗读" : "开始或继续朗读")
 
             Button {
                 controller.send(.previousPage)

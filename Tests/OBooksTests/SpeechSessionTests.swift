@@ -19,6 +19,47 @@ final class SpeechSessionTests: XCTestCase {
         XCTAssertEqual(fixture.session.position, position)
     }
 
+    func testMinimizedPlayerKeepsPlayingAcrossChaptersAndRestoresWithoutRestart() async throws {
+        let fixture = Fixture(["First.", "Next."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.minimizePlayer()
+        XCTAssertFalse(fixture.session.isPlayerVisible)
+        XCTAssertEqual(fixture.session.state, .playing)
+        fixture.engine.finish()
+        await fixture.waitForSpeech(count: 2)
+        XCTAssertEqual(fixture.session.sectionIndex, 1)
+        XCTAssertTrue(fixture.session.isMinimized)
+        let position = fixture.session.position
+        fixture.session.restorePlayer()
+        XCTAssertTrue(fixture.session.isPlayerVisible)
+        XCTAssertEqual(fixture.session.state, .playing)
+        XCTAssertEqual(fixture.session.position, position)
+        XCTAssertEqual(fixture.engine.calls.count, 2)
+    }
+
+    func testRestoringMinimizedPausedPlayerKeepsExpansionAndAudioPaused() async {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.isExpanded = true
+        fixture.session.pause()
+        let position = fixture.session.position
+        fixture.session.minimizePlayer()
+        fixture.session.restorePlayer()
+        XCTAssertTrue(fixture.session.isPlayerVisible)
+        XCTAssertTrue(fixture.session.isExpanded)
+        XCTAssertEqual(fixture.session.state, .paused)
+        XCTAssertEqual(fixture.session.position, position)
+        XCTAssertEqual(fixture.engine.calls.count, 1)
+        fixture.session.minimizePlayer()
+        fixture.session.stop()
+        XCTAssertFalse(fixture.session.isMinimized)
+        XCTAssertFalse(fixture.session.isPlayerVisible)
+    }
+
     func testChangedRateRestartsAtCurrentWordAndIgnoresOldEvents() async throws {
         let fixture = Fixture(["Hello world. Another sentence."])
         defer { fixture.close() }
