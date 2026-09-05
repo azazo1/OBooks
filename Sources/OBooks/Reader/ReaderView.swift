@@ -67,6 +67,29 @@ private final class ReaderProgressState: ObservableObject {
     }
 }
 
+private struct ReaderInlineNotePopover: ViewModifier {
+    let isPresented: Binding<Bool>
+    let anchor: CGRect?
+    let editor: AnyView
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .topLeading) {
+            if let anchor {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .position(x: anchor.midX, y: anchor.midY)
+                    .popover(
+                        isPresented: isPresented,
+                        attachmentAnchor: .rect(.bounds),
+                        arrowEdge: .bottom
+                    ) {
+                        editor
+                    }
+            }
+        }
+    }
+}
+
 struct ReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
@@ -101,6 +124,7 @@ struct ReaderView: View {
     @State private var noteText = ""
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var editingAnnotationID: UUID?
+    @State private var inlineNotePopoverRect: CGRect?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -180,12 +204,14 @@ struct ReaderView: View {
                     noteRange = range
                     noteText = ""
                     editingAnnotationID = nil
+                    inlineNotePopoverRect = nil
                     activePanel = .note
                     keepChromeVisible()
                 },
-                onAnnotationClick: { annotation in
+                onAnnotationClick: { annotation, rect in
                     guard annotation.kind == "note" else { return }
-                    beginEditingNote(annotation, inPanel: true)
+                    inlineNotePopoverRect = rect
+                    beginEditingNote(annotation, inPanel: false)
                 },
                 onAnnotationAtSection: { text, kind, annotationSectionIndex, range in
                     addAnnotation(
@@ -212,6 +238,11 @@ struct ReaderView: View {
                     pendingPositionAnimated = false
                 }
             )
+            .modifier(ReaderInlineNotePopover(
+                isPresented: inlineNotePopoverPresented,
+                anchor: inlineNotePopoverRect,
+                editor: AnyView(noteEditor)
+            ))
 
             topBar
         }
@@ -797,6 +828,7 @@ struct ReaderView: View {
                 Spacer()
                 Button {
                     editingAnnotationID = nil
+                    inlineNotePopoverRect = nil
                     if activePanel == .note { activePanel = nil }
                 } label: {
                     Image(systemName: "xmark")
@@ -809,8 +841,8 @@ struct ReaderView: View {
                 } label: {
                     Label("保存", systemImage: "checkmark")
                         .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 11)
-                        .frame(height: 28)
+                        .frame(width: 74, height: 28)
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)
@@ -907,6 +939,18 @@ struct ReaderView: View {
         )
     }
 
+    private var inlineNotePopoverPresented: Binding<Bool> {
+        Binding(
+            get: { editingAnnotationID != nil && inlineNotePopoverRect != nil },
+            set: { isPresented in
+                if !isPresented {
+                    editingAnnotationID = nil
+                    inlineNotePopoverRect = nil
+                }
+            }
+        )
+    }
+
     private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool) {
         guard annotation.kind == "note" else { return }
         noteContext = annotation.quote ?? ""
@@ -958,6 +1002,7 @@ struct ReaderView: View {
         }
         persistAnnotations()
         editingAnnotationID = nil
+        inlineNotePopoverRect = nil
         if activePanel == .note { activePanel = nil }
     }
 

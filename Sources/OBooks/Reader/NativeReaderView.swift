@@ -22,7 +22,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onSpeakingChanged: (Bool) -> Void
     let onAnnotation: (String, String, NSRange) -> Void
     let onNoteRequest: (String, NSRange) -> Void
-    var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
+    var onAnnotationClick: (ReaderAnnotation, NSRect) -> Void = { _, _ in }
     var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
     let onNavigate: (Int, String?) -> Void
@@ -178,7 +178,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
-        private var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
+        private var onAnnotationClick: (ReaderAnnotation, NSRect) -> Void = { _, _ in }
         private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
@@ -249,8 +249,8 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onNote = { [weak self] text, range in
                 self?.onNoteRequest(text, self?.localizedAnnotationRange(range) ?? range)
             }
-            textView.onAnnotationClick = { [weak self] annotation in
-                self?.onAnnotationClick(annotation)
+            textView.onAnnotationClick = { [weak self] annotation, rect in
+                self?.onAnnotationClick(annotation, rect)
             }
             textView.annotationAtLocation = { [weak self] location in
                 self?.annotation(at: location)
@@ -296,7 +296,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: @escaping (Bool) -> Void,
             onAnnotation: @escaping (String, String, NSRange) -> Void,
             onNoteRequest: @escaping (String, NSRange) -> Void,
-            onAnnotationClick: @escaping (ReaderAnnotation) -> Void = { _ in },
+            onAnnotationClick: @escaping (ReaderAnnotation, NSRect) -> Void = { _, _ in },
             onAnnotationAtSection: @escaping (String, String, Int, NSRange) -> Void = { _, _, _, _ in },
             onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
             onNavigate: @escaping (Int, String?) -> Void,
@@ -540,7 +540,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
-            onAnnotationClick = { _ in }
+            onAnnotationClick = { _, _ in }
             onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
             onNavigate = { _, _ in }

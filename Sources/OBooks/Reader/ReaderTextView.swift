@@ -4,7 +4,7 @@ import AppKit
 final class ReaderTextView: NSTextView {
     var onHighlight: ((String, NSRange) -> Void)?
     var onNote: ((String, NSRange) -> Void)?
-    var onAnnotationClick: ((ReaderAnnotation) -> Void)?
+    var onAnnotationClick: ((ReaderAnnotation, NSRect) -> Void)?
     var annotationAtLocation: ((Int) -> ReaderAnnotation?)?
     var onRemoveAnnotation: ((UUID) -> Void)?
     var onSpeak: ((Int) -> Void)?
@@ -245,7 +245,7 @@ final class ReaderTextView: NSTextView {
             if event.clickCount == 1, event.type == .leftMouseDown {
                 let location = characterLocation(for: event)
                 if let annotation = annotationAtLocation?(location), annotation.kind == "note" {
-                    onAnnotationClick?(annotation)
+                    onAnnotationClick?(annotation, annotationAnchorRect(for: event))
                     return
                 }
             }
@@ -259,7 +259,7 @@ final class ReaderTextView: NSTextView {
         if event.clickCount == 1 {
             let location = characterLocation(for: event)
             if let annotation = annotationAtLocation?(location), annotation.kind == "note" {
-                onAnnotationClick?(annotation)
+                onAnnotationClick?(annotation, annotationAnchorRect(for: event))
                 return
             }
         }
@@ -472,6 +472,26 @@ final class ReaderTextView: NSTextView {
         if textContainerInset != nextInset {
             textContainerInset = nextInset
         }
+    }
+
+    private func annotationAnchorRect(for event: NSEvent) -> NSRect {
+        guard let layoutManager else {
+            return NSRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+        }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let (textContainer, origin) = textContainerContext(at: point) else {
+            return NSRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+        }
+        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return NSRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
+        }
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        return glyphRect.offsetBy(dx: origin.x, dy: origin.y)
     }
 
     private func updatePageSelection(_ range: NSRange) {
