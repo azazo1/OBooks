@@ -211,7 +211,7 @@ struct ReaderView: View {
                 onAnnotationClick: { annotation, rect in
                     guard annotation.kind == "note" else { return }
                     inlineNotePopoverRect = rect
-                    beginEditingNote(annotation, inPanel: false)
+                    beginEditingNote(annotation, inPanel: false, navigate: false)
                 },
                 onAnnotationAtSection: { text, kind, annotationSectionIndex, range in
                     addAnnotation(
@@ -951,12 +951,19 @@ struct ReaderView: View {
         )
     }
 
-    private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool) {
+    private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool, navigate: Bool = true) {
         guard annotation.kind == "note" else { return }
         noteContext = annotation.quote ?? ""
         noteRange = annotation.range
         noteText = annotation.text
         editingAnnotationID = annotation.id
+        guard navigate else {
+            if inPanel {
+                activePanel = .note
+                keepChromeVisible()
+            }
+            return
+        }
         registerJump()
         guard book.spine.indices.contains(annotation.sectionIndex) else { return }
         sectionIndex = annotation.sectionIndex
