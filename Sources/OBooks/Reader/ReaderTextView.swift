@@ -315,7 +315,9 @@ final class ReaderTextView: NSTextView {
 
     override func mouseDragged(with event: NSEvent) {
         onSpeechInteraction?(true)
-        pendingImageHit = nil
+        if pendingImageHit != nil {
+            return
+        }
         guard pageColumns > 0,
               isSelectingPageText,
               let anchor = selectionAnchorLocation else {
@@ -338,12 +340,13 @@ final class ReaderTextView: NSTextView {
             onSpeechInteraction?(false)
             window?.invalidateCursorRects(for: self)
         }
-        if event.clickCount == 1, let hit = pendingImageHit {
+        if let pending = pendingImageHit {
             pendingImageHit = nil
-            if allowsImagePreview { onImageClick?(hit.image, hit.rect) }
+            if allowsImagePreview, pending.rect.contains(event.locationInWindow) {
+                onImageClick?(pending.image, pending.rect)
+            }
             return
         }
-        pendingImageHit = nil
         guard pageColumns > 0,
               isSelectingPageText else {
             super.mouseUp(with: event)

@@ -173,6 +173,50 @@ final class ReaderTextSelectionTests: XCTestCase {
         }
     }
 
+    func testImagePreviewOpensOnClickEvenAfterSmallDrag() throws {
+        let image = NSImage(size: NSSize(width: 160, height: 120))
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = NSRect(origin: .zero, size: image.size)
+        let content = NSMutableAttributedString(
+            string: "Caption\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 18)]
+        )
+        let imageLocation = content.length
+        content.append(NSAttributedString(attachment: attachment))
+        content.append(NSAttributedString(string: "\nMore text after the image.\n"))
+
+        for columns in [0, 1, 2] {
+            let fixture = Fixture(columns: max(1, columns), content: content)
+            defer { fixture.window.close() }
+            if columns == 0 {
+                fixture.scrollView.configure(flow: .scrolling(scope: .chapter))
+                fixture.textView.configurePageColumns(0, viewportHeight: 600)
+                fixture.textView.updateDocumentHeight(minimumHeight: 600)
+            }
+            let manager = try XCTUnwrap(fixture.textView.layoutManager)
+            let glyph = manager.glyphIndexForCharacter(at: imageLocation)
+            let point = fixture.point(forGlyph: glyph, containerIndex: 0)
+            let dragged = NSPoint(x: point.x + 3, y: point.y + 2)
+            let outside = NSPoint(x: fixture.textView.bounds.width - 10, y: point.y)
+            var opened: NSImage?
+            fixture.textView.onImageClick = { clicked, _ in opened = clicked }
+
+            let target = try fixture.hitView(at: point)
+            target.mouseDown(with: try fixture.event(.leftMouseDown, at: point))
+            XCTAssertNil(opened)
+            target.mouseDragged(with: try fixture.event(.leftMouseDragged, at: dragged))
+            target.mouseUp(with: try fixture.event(.leftMouseUp, at: dragged))
+            XCTAssertTrue(opened === image, "columns=\(columns)")
+
+            opened = nil
+            target.mouseDown(with: try fixture.event(.leftMouseDown, at: point))
+            target.mouseDragged(with: try fixture.event(.leftMouseDragged, at: outside))
+            target.mouseUp(with: try fixture.event(.leftMouseUp, at: outside))
+            XCTAssertNil(opened, "columns=\(columns)")
+        }
+    }
+
     @MainActor
     private final class Fixture {
         let window: NSWindow
