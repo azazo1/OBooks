@@ -58,6 +58,39 @@ final class ReaderImagePreviewTests: XCTestCase {
         XCTAssertEqual(zoom.pan, .zero)
     }
 
+    func testFitZoomKeepsImageCentered() {
+        let metrics = ReaderImagePreviewMetrics(
+            imageSize: CGSize(width: 400, height: 2000),
+            canvasSize: CGSize(width: 1044, height: 800)
+        )
+        let clamped = metrics.clampedOffset(CGSize(width: 400, height: 400), zoom: 1)
+        XCTAssertEqual(clamped.width, 0, accuracy: 0.001)
+        XCTAssertEqual(clamped.height, 0, accuracy: 0.001)
+    }
+
+    func testZoomedShortSideCanPan() {
+        let metrics = ReaderImagePreviewMetrics(
+            imageSize: CGSize(width: 400, height: 2000),
+            canvasSize: CGSize(width: 1044, height: 800)
+        )
+        let displayed = metrics.displayedSize(zoom: 2)
+        XCTAssertLessThan(displayed.width, metrics.contentSize.width)
+        let pan = metrics.clampedOffset(CGSize(width: 180, height: 0), zoom: 2)
+        XCTAssertEqual(pan.width, 180, accuracy: 0.001)
+    }
+
+    func testZoomedEdgeCanReachViewportCenter() {
+        let metrics = ReaderImagePreviewMetrics(
+            imageSize: CGSize(width: 4000, height: 2000),
+            canvasSize: CGSize(width: 1044, height: 800)
+        )
+        let displayed = metrics.displayedSize(zoom: 2)
+        let toCenter = CGSize(width: displayed.width / 2, height: displayed.height / 2)
+        let pan = metrics.clampedOffset(toCenter, zoom: 2)
+        XCTAssertEqual(pan.width, toCenter.width, accuracy: 0.001)
+        XCTAssertEqual(pan.height, toCenter.height, accuracy: 0.001)
+    }
+
     func testBlankPointIsOutsideFittedImage() {
         let metrics = ReaderImagePreviewMetrics(
             imageSize: CGSize(width: 200, height: 100),

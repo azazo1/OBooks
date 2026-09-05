@@ -61,14 +61,21 @@ struct ReaderImagePreviewMetrics: Equatable {
     }
 
     func clampedOffset(_ offset: CGSize, zoom: CGFloat) -> CGSize {
+        guard zoom > 1.01 else { return .zero }
         let displayed = displayedSize(zoom: zoom)
         let content = contentSize
-        let horizontalLimit = max(0, (displayed.width - content.width) / 2)
-        let verticalLimit = max(0, (displayed.height - content.height) / 2)
+        let horizontalLimit = panLimit(displayed: displayed.width, viewport: content.width)
+        let verticalLimit = panLimit(displayed: displayed.height, viewport: content.height)
         return CGSize(
             width: min(horizontalLimit, max(-horizontalLimit, offset.width)),
             height: min(verticalLimit, max(-verticalLimit, offset.height))
         )
+    }
+
+    /// 确保视口内始终保留一部分图片, 同时允许图片边缘拖动至视口中央.
+    func panLimit(displayed: CGFloat, viewport: CGFloat) -> CGFloat {
+        let minVisible = min(120, viewport * 0.25)
+        return max(0, (displayed + viewport) / 2 - minVisible)
     }
 
     static func scrollEffect(
