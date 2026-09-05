@@ -18,6 +18,8 @@ final class ReaderTextView: NSTextView {
     private var contextLocation = 0
     private var contextAnnotationID: UUID?
     private var cursorTrackingArea: NSTrackingArea?
+    private var cursorEventMonitor: Any?
+    private var cursorCoveredByOtherView = false
     private var pageColumns = 0
     private(set) var pageViewportHeight: CGFloat = 0
     private(set) var pageCount = 1
@@ -29,8 +31,25 @@ final class ReaderTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if let cursorEventMonitor {
+            NSEvent.removeMonitor(cursorEventMonitor)
+            self.cursorEventMonitor = nil
+        }
         window?.acceptsMouseMovedEvents = true
+        if window != nil {
+            cursorEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+                guard let self, event.window === self.window else { return event }
+                self.updateCursor(for: event)
+                return event
+            }
+        }
         window?.invalidateCursorRects(for: self)
+    }
+
+    deinit {
+        if let cursorEventMonitor {
+            NSEvent.removeMonitor(cursorEventMonitor)
+        }
     }
 
     func setReadingInsets(horizontal: CGFloat, vertical: CGFloat) {
@@ -238,6 +257,9 @@ final class ReaderTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         onSpeechInteraction?(true)
+        if selectedRange().length > 0 {
+            NSCursor.iBeam.set()
+        }
         defer {
             if !isSelectingPageText, pendingImageHit == nil { onSpeechInteraction?(false) }
         }
@@ -306,10 +328,16 @@ final class ReaderTextView: NSTextView {
             length: abs(location - anchor)
         )
         updatePageSelection(range)
+        if range.length > 0 {
+            NSCursor.iBeam.set()
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { onSpeechInteraction?(false) }
+        defer {
+            onSpeechInteraction?(false)
+            window?.invalidateCursorRects(for: self)
+        }
         if event.clickCount == 1, let hit = pendingImageHit {
             pendingImageHit = nil
             if allowsImagePreview { onImageClick?(hit.image, hit.rect) }
@@ -333,6 +361,13 @@ final class ReaderTextView: NSTextView {
     }
 
     override func resetCursorRects() {
+        if NSEvent.pressedMouseButtons == 0,
+           let window {
+            cursorCoveredByOtherView = !isMouseOverTextView(
+                at: window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            )
+        }
+        guard !cursorCoveredByOtherView else { return }
         guard let layoutManager, let textStorage else { return }
         guard !visibleRect.isEmpty else { return }
         let string = textStorage.string as NSString
@@ -400,7 +435,20 @@ final class ReaderTextView: NSTextView {
     }
 
     private func updateCursor(for event: NSEvent) {
+        if NSEvent.pressedMouseButtons != 0 {
+            if selectedRange().length > 0 {
+                NSCursor.iBeam.set()
+            }
+            return
+        }
+        let isOverText = isMouseOverTextView(at: event.locationInWindow)
+        let coveredByOtherView = !isOverText
+        if cursorCoveredByOtherView != coveredByOtherView {
+            cursorCoveredByOtherView = coveredByOtherView
+            window?.invalidateCursorRects(for: self)
+        }
         NSCursor.arrow.set()
+        guard isOverText else { return }
         guard let layoutManager, let textStorage else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard let (textContainer, origin) = textContainerContext(at: point) else { return }
@@ -425,6 +473,11 @@ final class ReaderTextView: NSTextView {
         )
         guard character.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return }
         NSCursor.iBeam.set()
+    }
+
+    private func isMouseOverTextView(at windowPoint: NSPoint) -> Bool {
+        guard let hitView = window?.contentView?.hitTest(windowPoint) else { return false }
+        return hitView === self || hitView.isDescendant(of: self)
     }
 
     private func link(at event: NSEvent) -> URL? {
