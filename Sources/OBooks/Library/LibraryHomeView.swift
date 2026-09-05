@@ -196,8 +196,8 @@ private struct ContinueBookCard: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button(action: action) {
+        Button(action: action) {
+            VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     BookCoverImage(book: book, store: store)
                         .frame(width: 48, height: 68)
@@ -238,9 +238,19 @@ private struct ContinueBookCard: View {
                 }
                 .padding(12)
                 .frame(width: 232, height: 94)
-            }
-            .buttonStyle(.plain)
 
+                if book.isNearCompletion {
+                    Color.black.opacity(0.08)
+                        .frame(height: 36)
+                }
+            }
+            .frame(width: 232, height: book.isNearCompletion ? 130 : 94)
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .background(OBooksPalette.card, in: RoundedRectangle(cornerRadius: 9))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(alignment: .bottomLeading) {
             if book.isNearCompletion {
                 Button(action: onToggleFinished) {
                     Label("标记为已读完", systemImage: "checkmark.circle")
@@ -251,15 +261,10 @@ private struct ContinueBookCard: View {
                         .background(Color.white.opacity(0.12), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 10)
                 .frame(height: 36)
-                .background(Color.black.opacity(0.08))
             }
         }
-        .frame(width: 232, height: book.isNearCompletion ? 130 : 94)
-        .background(OBooksPalette.card, in: RoundedRectangle(cornerRadius: 9))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
         .overlay(alignment: .topTrailing) {
             BookActionMenu(
                 isFinished: book.isFinished,
