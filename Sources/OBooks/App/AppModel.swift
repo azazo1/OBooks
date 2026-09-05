@@ -116,8 +116,8 @@ final class AppModel: ObservableObject {
     }
 
     func openReader(_ book: BookSummary) {
-        updateLastOpened(book.id)
         if let window = readerWindows[book.id] {
+            updateLastOpened(book.id)
             AppWindowConfiguration.applyPrimaryStageBehavior(window)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -143,7 +143,7 @@ final class AppModel: ObservableObject {
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         window.isMovableByWindowBackground = true
-        window.backgroundColor = .windowBackgroundColor
+        window.backgroundColor = AppWindowConfiguration.readerWindowBackgroundColor()
         window.contentViewController = hostingController
         window.setContentSize(initialSize)
         AppWindowConfiguration.applyPrimaryStageBehavior(window)
@@ -169,6 +169,8 @@ final class AppModel: ObservableObject {
         window.makeKeyAndOrderFront(nil)
         AppWindowConfiguration.centerOnScreen(window)
         NSApp.activate(ignoringOtherApps: true)
+        updateLastOpened(book.id)
+        logger.info("打开阅读窗口: title=\(book.title, privacy: .public)")
     }
 
     private func closeReader(for bookID: UUID) {

@@ -24,4 +24,17 @@ final class AppWindowConfigurationTests: XCTestCase {
 
         XCTAssertEqual(window.collectionBehavior, [.primary, .managed])
     }
+
+    func testReaderWindowBackgroundFollowsAppearance() {
+        let dark = NSAppearance(named: .darkAqua)!
+        let light = NSAppearance(named: .aqua)!
+        XCTAssertEqual(
+            AppWindowConfiguration.readerWindowBackgroundColor(appearance: dark),
+            .black
+        )
+        XCTAssertEqual(
+            AppWindowConfiguration.readerWindowBackgroundColor(appearance: light),
+            .windowBackgroundColor
+        )
+    }
 }

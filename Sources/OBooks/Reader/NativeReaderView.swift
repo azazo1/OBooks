@@ -30,6 +30,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
+    var onContentReady: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(speech: controller.speech)
@@ -98,9 +99,10 @@ struct NativeReaderView: NSViewRepresentable {
             onImageClick: onImageClick,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
-            onPositionConsumed: onPositionConsumed
+            onPositionConsumed: onPositionConsumed,
+            onContentReady: onContentReady
         )
-        context.coordinator.loadSectionIfNeeded()
+        context.coordinator.scheduleInitialLoadIfNeeded()
         return scrollView
     }
 
@@ -132,9 +134,14 @@ struct NativeReaderView: NSViewRepresentable {
             onImageClick: onImageClick,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
-            onPositionConsumed: onPositionConsumed
+            onPositionConsumed: onPositionConsumed,
+            onContentReady: onContentReady
         )
-        coordinator.loadSectionIfNeeded()
+        if coordinator.hasCompletedInitialLoad {
+            coordinator.loadSectionIfNeeded()
+        } else {
+            coordinator.scheduleInitialLoadIfNeeded()
+        }
         if coordinator.lastCommandID != controller.command?.id, let command = controller.command {
             coordinator.lastCommandID = command.id
             Task { @MainActor [weak coordinator] in coordinator?.execute(command.action) }
@@ -189,6 +196,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
+        private var onContentReady: () -> Void = {}
         private var pendingProgress: Double?
         private var pendingReadingPosition: ReadingPosition?
         private var positionBeingRestored: ReadingPosition?
@@ -206,6 +214,10 @@ struct NativeReaderView: NSViewRepresentable {
     private var chapterDocuments: [Int: NativeChapterDocument] = [:]
     private var updatingDocument = false
     private let scrollNavigationRevealOffset: CGFloat = 72
+        private var initialLoadTask: Task<Void, Never>?
+        private var isInitialLoadScheduled = false
+        private var didNotifyContentReady = false
+        private(set) var hasCompletedInitialLoad = false
         var lastCommandID: UUID?
 
         init(speech: SpeechSession? = nil) {
@@ -328,7 +340,8 @@ struct NativeReaderView: NSViewRepresentable {
             onImageClick: @escaping (NSImage, NSRect) -> Void = { _, _ in },
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
-            onPositionConsumed: @escaping () -> Void
+            onPositionConsumed: @escaping () -> Void,
+            onContentReady: @escaping () -> Void = {}
         ) {
             let nextSettings = Settings(theme: theme, flow: flow, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
             let settingsChanged = settings != nextSettings
@@ -394,6 +407,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onNavigate = onNavigate
             self.onAnchorConsumed = onAnchorConsumed
             self.onPositionConsumed = onPositionConsumed
+            self.onContentReady = onContentReady
             if annotationsChanged {
                 applyAnnotations()
                 speechBridge.refresh()
@@ -492,7 +506,7 @@ struct NativeReaderView: NSViewRepresentable {
             clearSpeechRange()
             let appearance = NativeReaderAppearance(theme: settings.theme)
             do {
-                let loaded = try loadContent(book: book, appearance: appearance)
+                let loaded = try loadContent(book: book)
                 let attributedText = loaded.document.attributedText
                 textView.backgroundColor = appearance.background
                 textView.insertionPointColor = appearance.accent
@@ -577,6 +591,60 @@ struct NativeReaderView: NSViewRepresentable {
             }
         }
 
+        func scheduleInitialLoadIfNeeded() {
+            guard !isInitialLoadScheduled else { return }
+            isInitialLoadScheduled = true
+            guard let book, book.spine.indices.contains(requestedSectionIndex) else {
+                hasCompletedInitialLoad = true
+                loadSectionIfNeeded()
+                notifyContentReady()
+                return
+            }
+            let sectionIndex = requestedSectionIndex
+            let fontSize = settings.fontSize
+            let lineHeight = settings.lineHeight
+            let theme = settings.theme
+            let settingsSnapshot = settings
+            let started = Date()
+            logger.info("开始异步加载章节: section=\(sectionIndex)")
+            initialLoadTask = Task { [weak self] in
+                let document = await Task.detached(priority: .userInitiated) {
+                    try? NativeChapterLoader().loadDocument(
+                        book: book,
+                        sectionIndex: sectionIndex,
+                        fontSize: fontSize,
+                        lineHeight: lineHeight,
+                        foreground: NativeReaderAppearance(theme: theme).foreground
+                    )
+                }.value
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard let self, !self.isTornDown else { return }
+                    let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+                    if let document,
+                       self.settings == settingsSnapshot,
+                       self.requestedSectionIndex == sectionIndex
+                    {
+                        self.chapterDocuments[sectionIndex] = document
+                        self.logger.info(
+                            "异步章节加载完成: section=\(sectionIndex), characters=\(document.attributedText.length), durationMs=\(elapsedMs)"
+                        )
+                    } else {
+                        self.logger.info("异步章节未直接应用, 将按当前设置加载: section=\(sectionIndex), durationMs=\(elapsedMs)")
+                    }
+                    self.hasCompletedInitialLoad = true
+                    self.loadSectionIfNeeded()
+                    self.notifyContentReady()
+                }
+            }
+        }
+
+        private func notifyContentReady() {
+            guard !didNotifyContentReady else { return }
+            didNotifyContentReady = true
+            onContentReady()
+        }
+
         func execute(_ action: ReaderAction) {
             guard !isTornDown else { return }
             handleUserInteraction()
@@ -641,6 +709,8 @@ struct NativeReaderView: NSViewRepresentable {
             loadedBookStartIndex = -1
             loadedBookEndIndex = -1
             loadingAdjacentChapter = false
+            initialLoadTask?.cancel()
+            initialLoadTask = nil
             chapterDocuments.removeAll()
             textView?.onHighlight = nil
             textView?.onNote = nil
@@ -764,8 +834,7 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func loadContent(
-            book: BookSummary,
-            appearance: NativeReaderAppearance
+            book: BookSummary
         ) throws -> (document: NativeChapterDocument, ranges: [String: NSRange], indices: [String: Int], sectionAnchors: [String: [String: Int]], isBook: Bool) {
             guard settings.flow.scrollScope == .book else {
                 let document = try chapterDocument(at: requestedSectionIndex)
@@ -776,13 +845,7 @@ struct NativeReaderView: NSViewRepresentable {
             }
 
             let index = min(max(requestedSectionIndex, 0), max(book.spine.count - 1, 0))
-            let chapter = try loader.loadDocument(
-                book: book,
-                sectionIndex: index,
-                fontSize: settings.fontSize,
-                lineHeight: settings.lineHeight,
-                foreground: appearance.foreground
-            )
+            let chapter = try chapterDocument(at: index)
             let identity = spineIdentity(book.spine[index])
             let ranges = [identity: NSRange(location: 0, length: chapter.attributedText.length)]
             let indices = [identity: index]

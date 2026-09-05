@@ -110,6 +110,8 @@ struct ReaderView: View {
     @State private var noteEditorSource: NoteEditorSource?
     @State private var activeImage: NSImage?
     @State private var activeImageRect: NSRect?
+    @State private var isOpening = true
+    @State private var openingStartedAt = Date()
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -226,15 +228,21 @@ struct ReaderView: View {
                 onPositionConsumed: {
                     pendingPosition = nil
                     pendingPositionAnimated = false
-                }
+                },
+                onContentReady: revealReader
             )
+            .opacity(isOpening ? 0 : 1)
+            .scaleEffect(isOpening ? 0.985 : 1)
+            .allowsHitTesting(!isOpening)
             topBar
         }
         .overlay(alignment: .bottom) {
-            readerFooter
+            if !isOpening {
+                readerFooter
+            }
         }
         .overlay(alignment: .bottom) {
-            if flow.isPaging {
+            if !isOpening, flow.isPaging {
                 Text("\(pageNumber) / \(pageCount)")
                     .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(theme == .paper ? .black.opacity(0.52) : .white.opacity(0.52))
@@ -256,7 +264,7 @@ struct ReaderView: View {
         }
         .overlay {
             ReaderMouseTracker(
-                chromeVisible: chromeVisible,
+                chromeVisible: isOpening || chromeVisible,
                 edgeThreshold: 88,
                 cornerOnly: activeImage != nil
             ) { isNear in
@@ -273,9 +281,16 @@ struct ReaderView: View {
                 }
             }
         }
+        .overlay {
+            if isOpening {
+                ReaderOpeningOverlay(book: book, store: appModel.libraryStore)
+                    .transition(.opacity)
+            }
+        }
         .frame(minWidth: 980, minHeight: 680)
         .ignoresSafeArea(.container, edges: .top)
         .background(chromeBackground)
+        .background(ReaderWindowBackground(isDark: colorScheme == .dark))
         .onAppear {
             controller.speech.playbackOwner = appModel.speechPlaybackOwner
             progressState.configure { fraction, position in
@@ -285,7 +300,9 @@ struct ReaderView: View {
             if colorScheme == .light && theme == .focus {
                 theme = .paper
             }
-            scheduleChromeHide(after: .seconds(1.4))
+            if !isOpening {
+                scheduleChromeHide(after: .seconds(1.4))
+            }
         }
         .onChange(of: flow) { _, newFlow in
             UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
@@ -394,8 +411,8 @@ struct ReaderView: View {
                 .fill(Color.white.opacity(0.08))
                 .frame(height: 1)
         }
-        .opacity(chromeVisible ? 1 : 0)
-        .allowsHitTesting(chromeVisible)
+        .opacity(!isOpening && chromeVisible ? 1 : 0)
+        .allowsHitTesting(!isOpening && chromeVisible)
         .animation(.easeOut(duration: 0.18), value: chromeVisible)
     }
 
@@ -951,6 +968,21 @@ struct ReaderView: View {
         Self.spineIdentity(item)
     }
 
+    private func revealReader() {
+        guard isOpening else { return }
+        Task { @MainActor in
+            let remaining = 0.32 - Date().timeIntervalSince(openingStartedAt)
+            if remaining > 0 {
+                try? await Task.sleep(for: .seconds(remaining))
+            }
+            guard isOpening else { return }
+            withAnimation(.easeInOut(duration: 0.48)) {
+                isOpening = false
+            }
+            scheduleChromeHide(after: .seconds(1.4))
+        }
+    }
+
     private func keepChromeVisible() {
         chromeVisible = true
         hideChromeTask?.cancel()
@@ -1165,6 +1197,18 @@ struct ReaderView: View {
         case .quiet, .calm: return Color.white.opacity(0.82)
         default: return Color.white.opacity(0.88)
         }
+    }
+}
+
+private struct ReaderWindowBackground: NSViewRepresentable {
+    let isDark: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.window?.backgroundColor = AppWindowConfiguration.readerWindowBackgroundColor(isDark: isDark)
     }
 }
 
