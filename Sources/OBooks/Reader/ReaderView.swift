@@ -68,6 +68,11 @@ private final class ReaderProgressState: ObservableObject {
 }
 
 struct ReaderView: View {
+    private enum NoteEditorSource: Equatable {
+        case panel
+        case highlightsList
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
 
@@ -101,6 +106,7 @@ struct ReaderView: View {
     @State private var noteText = ""
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var editingAnnotationID: UUID?
+    @State private var noteEditorSource: NoteEditorSource?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -180,6 +186,7 @@ struct ReaderView: View {
                     noteRange = range
                     noteText = ""
                     editingAnnotationID = nil
+                    noteEditorSource = .panel
                     activePanel = .note
                     keepChromeVisible()
                 },
@@ -254,7 +261,19 @@ struct ReaderView: View {
         .onChange(of: flow) { _, newFlow in
             UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
         }
-        .onChange(of: activePanel) { _, panel in
+        .onChange(of: activePanel) { previousPanel, panel in
+            if panel == nil, noteEditorSource != nil {
+                editingAnnotationID = nil
+                noteEditorSource = nil
+            } else if noteEditorSource == .highlightsList && panel != .highlights {
+                editingAnnotationID = nil
+                noteEditorSource = nil
+            } else if noteEditorSource == .panel,
+                      previousPanel == .note,
+                      panel == .highlights {
+                editingAnnotationID = nil
+                noteEditorSource = nil
+            }
             if panel == nil {
                 focusedField = nil
                 scheduleChromeHide(after: .milliseconds(650))
@@ -371,8 +390,8 @@ struct ReaderView: View {
         Binding(
             get: { activePanel?.anchor == anchor ? activePanel : nil },
             set: { panel in
-                // 旧弹窗延迟关闭时, 不能清掉另一个按钮刚打开的弹窗.
                 if let panel {
+                    guard activePanel == panel else { return }
                     activePanel = panel
                 } else if activePanel?.anchor == anchor {
                     activePanel = nil
@@ -515,6 +534,7 @@ struct ReaderView: View {
                                 Button("编辑笔记", systemImage: "pencil") {
                                     beginEditingNote(annotation, inPanel: false, navigate: false)
                                 }
+                                Divider().padding(.vertical, 3)
                             }
                             Button(
                                 annotation.kind == "note" ? "删除笔记" : "取消高亮",
@@ -796,6 +816,7 @@ struct ReaderView: View {
                 Spacer()
                 Button {
                     editingAnnotationID = nil
+                    noteEditorSource = nil
                     if activePanel == .note { activePanel = nil }
                 } label: {
                     Image(systemName: "xmark")
@@ -831,10 +852,18 @@ struct ReaderView: View {
 
     private func editingBinding(for annotation: ReaderAnnotation) -> Binding<Bool> {
         Binding(
-            get: { editingAnnotationID == annotation.id },
+            get: {
+                noteEditorSource == .highlightsList
+                    && activePanel == .highlights
+                    && editingAnnotationID == annotation.id
+            },
             set: { isPresented in
-                if !isPresented, editingAnnotationID == annotation.id {
+                if !isPresented,
+                   noteEditorSource == .highlightsList,
+                   editingAnnotationID == annotation.id
+                {
                     editingAnnotationID = nil
+                    noteEditorSource = nil
                 }
             }
         )
@@ -903,6 +932,10 @@ struct ReaderView: View {
     }
 
     private func togglePanel(_ panel: ReaderPanel) {
+        if panel == .highlights, activePanel == .note {
+            activePanel = .highlights
+            return
+        }
         activePanel = activePanel?.anchor == panel ? nil : panel
     }
 
@@ -912,6 +945,7 @@ struct ReaderView: View {
         noteRange = annotation.range
         noteText = annotation.text
         editingAnnotationID = annotation.id
+        noteEditorSource = inPanel ? .panel : .highlightsList
         guard navigate else {
             if inPanel {
                 activePanel = .note
@@ -964,6 +998,7 @@ struct ReaderView: View {
         }
         persistAnnotations()
         editingAnnotationID = nil
+        noteEditorSource = nil
         if activePanel == .note { activePanel = nil }
     }
 
