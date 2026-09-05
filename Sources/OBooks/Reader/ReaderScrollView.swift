@@ -11,7 +11,7 @@ final class ReaderScrollView: NSScrollView {
     var onUserScroll: (() -> Void)?
     var pageTurn: ((Int) -> ReaderPageTurn?)?
     var onPageTurnCompleted: (() -> Void)?
-    var onViewportSizeChanged: ((Int?) -> Void)?
+    var onViewportSizeChanged: ((Int?, CGFloat?) -> Void)?
     private(set) var pageFlow: ReaderFlowMode = .scrolling(scope: .chapter)
     private var scrollTargetY: CGFloat?
     private var refreshLink: CADisplayLink?
@@ -76,7 +76,12 @@ final class ReaderScrollView: NSScrollView {
         if changed { prepareForProgrammaticScroll() }
         let location = (documentView as? ReaderTextView)?.visibleCharacterLocation()
         super.setFrameSize(newSize)
-        if changed { onViewportSizeChanged?(location) }
+        if changed {
+            let viewportOffset = (documentView as? ReaderTextView)?.viewportOffset(
+                forCharacter: location ?? 0
+            )
+            onViewportSizeChanged?(location, viewportOffset)
+        }
     }
 
     override func scrollWheel(with event: NSEvent) {

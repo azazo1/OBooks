@@ -27,6 +27,32 @@ final class ReaderPageNavigationTests: XCTestCase {
         }
     }
 
+    func testOpeningSavedChapterScrollPositionDoesNotDrift() async throws {
+        try await assertScrollPositionSurvivesReopening(scope: .chapter)
+    }
+
+    func testOpeningSavedBookScrollPositionDoesNotDrift() async throws {
+        try await assertScrollPositionSurvivesReopening(scope: .book)
+    }
+
+    private func assertScrollPositionSurvivesReopening(scope: ReaderScrollScope) async throws {
+        let flow = ReaderFlowMode.scrolling(scope: scope)
+        let firstReader = try Fixture(flow: flow)
+        firstReader.scrollView.scroll(to: 1407.25, animated: false)
+        try await Task.sleep(for: .milliseconds(30))
+        let expectedOffset = firstReader.scrollView.contentView.bounds.minY
+        var savedPosition = try XCTUnwrap(firstReader.positions.last)
+        firstReader.close()
+
+        for _ in 0..<3 {
+            let reader = try Fixture(position: savedPosition, flow: flow)
+            defer { reader.close() }
+            try await Task.sleep(for: .milliseconds(30))
+            XCTAssertEqual(reader.scrollView.contentView.bounds.minY, expectedOffset, accuracy: 0.5)
+            savedPosition = try XCTUnwrap(reader.positions.last)
+        }
+    }
+
     func testChapterBoundaryAndReverseTurnRestoreExactPage() async throws {
         let reader = try Fixture()
         defer { reader.close() }
@@ -178,7 +204,10 @@ final class ReaderPageNavigationTests: XCTestCase {
         var positions: [ReadingPosition] = []
         var pendingPosition: ReadingPosition?
 
-        init(position: ReadingPosition? = nil) throws {
+        init(
+            position: ReadingPosition? = nil,
+            flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)
+        ) throws {
             _ = NSApplication.shared
             window = NSWindow(contentRect: scrollView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
@@ -214,7 +243,7 @@ final class ReaderPageNavigationTests: XCTestCase {
             textView.textContainer?.lineFragmentPadding = 0
             scrollView.documentView = textView
             coordinator.attach(scrollView: scrollView, textView: textView)
-            update()
+            update(flow: flow)
         }
 
         func update(fontSize: Double = 18, flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)) {

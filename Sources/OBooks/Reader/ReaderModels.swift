@@ -119,10 +119,12 @@ enum ReaderFlowMode: Equatable {
 struct ReadingPosition: Codable, Hashable, Sendable {
     let spineID: String
     let characterOffset: Int
+    let viewportOffset: Double?
 
-    init(spineID: String, characterOffset: Int) {
+    init(spineID: String, characterOffset: Int, viewportOffset: Double? = nil) {
         self.spineID = spineID
         self.characterOffset = characterOffset
+        self.viewportOffset = viewportOffset
     }
 }
 

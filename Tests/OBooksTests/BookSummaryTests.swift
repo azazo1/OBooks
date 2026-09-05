@@ -38,7 +38,7 @@ final class BookSummaryTests: XCTestCase {
 
     func testReadingPositionRoundTrips() throws {
         var book = makeBook(progressFraction: 0.42)
-        let position = ReadingPosition(spineID: "chapter-2", characterOffset: 1234)
+        let position = ReadingPosition(spineID: "chapter-2", characterOffset: 1234, viewportOffset: 18.5)
         book.readingPosition = position
 
         let restored = try JSONDecoder().decode(BookSummary.self, from: JSONEncoder().encode(book))

@@ -146,6 +146,11 @@ final class ReaderTextView: NSTextView {
         return rect.minY + textContainerOrigin.y
     }
 
+    func viewportOffset(forCharacter location: Int) -> CGFloat? {
+        guard let documentY = documentY(forCharacter: location) else { return nil }
+        return documentY - visibleRect.minY
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard pageColumns > 0 else {
             super.draw(dirtyRect)

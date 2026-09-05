@@ -210,12 +210,17 @@ struct NativeReaderView: NSViewRepresentable {
                 readerScrollView.onPageTurnCompleted = { [weak self] in
                     self?.reportProgress()
                 }
-                readerScrollView.onViewportSizeChanged = { [weak self] location in
+                readerScrollView.onViewportSizeChanged = { [weak self] location, viewportOffset in
                     guard let self, self.loadedSettings != nil else { return }
                     self.updatingDocument = true
                     self.updateDocumentLayout()
                     if let location {
-                        self.scrollToCharacter(location, animated: false, locationIsGlobal: true)
+                        self.scrollToCharacter(
+                            location,
+                            animated: false,
+                            locationIsGlobal: true,
+                            viewportOffset: viewportOffset ?? 0
+                        )
                     }
                     self.updatingDocument = false
                     self.reportProgress()
@@ -322,13 +327,13 @@ struct NativeReaderView: NSViewRepresentable {
                (currentSectionIndex == sectionIndex || loadedBookContent) {
                 if positionAnimated {
                     handleUserInteraction()
-                    scrollToCharacter(pendingPosition.characterOffset, animated: true)
+                    scrollToReadingPosition(pendingPosition, animated: true)
                     consumePendingPosition()
                     return
                 }
                 positionBeingRestored = pendingPosition
                 isRestoringPosition = true
-                scrollToCharacter(pendingPosition.characterOffset, animated: false)
+                scrollToReadingPosition(pendingPosition, animated: false)
                 schedulePositionRestoration()
                 consumePendingPosition()
             }
@@ -430,9 +435,9 @@ struct NativeReaderView: NSViewRepresentable {
                           isPositionLoaded(positionBeingRestored) {
                     if pendingPositionAnimated {
                         handleUserInteraction()
-                        scrollToCharacter(positionBeingRestored.characterOffset, animated: true)
+                        scrollToReadingPosition(positionBeingRestored, animated: true)
                     } else {
-                        scrollToCharacter(positionBeingRestored.characterOffset, animated: false)
+                        scrollToReadingPosition(positionBeingRestored, animated: false)
                         schedulePositionRestoration()
                     }
                     if pendingPosition != nil {
@@ -440,7 +445,7 @@ struct NativeReaderView: NSViewRepresentable {
                     }
                 } else if let pendingPosition {
                     if isPositionForCurrentSection(pendingPosition) {
-                        scrollToCharacter(pendingPosition.characterOffset, animated: false)
+                        scrollToReadingPosition(pendingPosition, animated: false)
                     }
                     consumePendingPosition()
                 } else if !settings.flow.isPaging,
@@ -531,7 +536,7 @@ struct NativeReaderView: NSViewRepresentable {
                 guard self.isRestoringPosition,
                       let position = self.positionBeingRestored,
                       self.isPositionLoaded(position) else { return }
-                self.scrollToCharacter(position.characterOffset, animated: false)
+                self.scrollToReadingPosition(position, animated: false)
                 self.isRestoringPosition = false
                 self.positionBeingRestored = nil
                 self.reportProgress()
@@ -614,7 +619,8 @@ struct NativeReaderView: NSViewRepresentable {
             }
             return ReadingPosition(
                 spineID: spineIdentity(book.spine[index]),
-                characterOffset: max(0, localLocation)
+                characterOffset: max(0, localLocation),
+                viewportOffset: textView?.viewportOffset(forCharacter: visibleLocation).map(Double.init)
             )
         }
 
@@ -684,7 +690,8 @@ struct NativeReaderView: NSViewRepresentable {
         private func scrollToCharacter(
             _ location: Int,
             animated: Bool,
-            locationIsGlobal: Bool = false
+            locationIsGlobal: Bool = false,
+            viewportOffset: CGFloat = 0
         ) {
             guard let textView, let scrollView else { return }
             let length = (textView.string as NSString).length
@@ -704,6 +711,10 @@ struct NativeReaderView: NSViewRepresentable {
                 scroll(to: pageOffset, animated: animated)
                 return
             }
+            if let documentY = textView.documentY(forCharacter: clampedLocation) {
+                scroll(to: documentY - viewportOffset, animated: animated)
+                return
+            }
             let range = NSRange(location: clampedLocation, length: 1)
             let scroll = {
                 textView.scrollRangeToVisible(range)
@@ -717,6 +728,21 @@ struct NativeReaderView: NSViewRepresentable {
             } else {
                 scroll()
             }
+        }
+
+        private func scrollToReadingPosition(_ position: ReadingPosition, animated: Bool) {
+            let globalLocation: Int
+            if loadedBookContent, let range = sectionRanges[position.spineID] {
+                globalLocation = range.location + position.characterOffset
+            } else {
+                globalLocation = position.characterOffset
+            }
+            scrollToCharacter(
+                globalLocation,
+                animated: animated,
+                locationIsGlobal: true,
+                viewportOffset: CGFloat(position.viewportOffset ?? 0)
+            )
         }
 
         private func startSpeech(at location: Int) {
@@ -1156,7 +1182,8 @@ struct NativeReaderView: NSViewRepresentable {
             }
             let position = ReadingPosition(
                 spineID: identity,
-                characterOffset: localLocation
+                characterOffset: localLocation,
+                viewportOffset: textView?.viewportOffset(forCharacter: visibleLocation).map(Double.init)
             )
             reportPageInfo(offset: scrollView.contentView.bounds.origin.y)
             notifyProgress(min(1, max(0, overallFraction)), position: position)
