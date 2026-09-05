@@ -138,20 +138,21 @@ struct ReaderImageViewer: View {
                                 .font(.system(size: 11).monospacedDigit())
                                 .foregroundStyle(.white.opacity(0.55))
                             Button(action: requestClose) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.82))
-                                    .frame(width: 28, height: 28)
+                                Group() {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.82))
+                                        .frame(width: 28, height: 28)
+                                }
+                                .contentShape(Rectangle())
+                                .overlay {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.12))
+                                        .frame(width: 28, height: 28)
+                                        .allowsHitTesting(false)
+                                }
                             }
                             .buttonStyle(.plain)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                            .overlay {
-                                Circle()
-                                    .fill(Color.white.opacity(0.12))
-                                    .frame(width: 28, height: 28)
-                                    .allowsHitTesting(false)
-                            }
                             .help("关闭图片预览")
                         }
                         .padding(.horizontal, 18)
