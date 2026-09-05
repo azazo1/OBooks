@@ -76,7 +76,8 @@ struct LibraryView: View {
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
                     onDelete: requestDelete,
-                    onToggleFinished: { appModel.toggleFinished(for: $0.id) }
+                    onToggleFinished: { appModel.toggleFinished(for: $0.id) },
+                    onRemoveFromContinueReading: { appModel.removeFromContinueReading(for: $0.id) }
                 )
             } else {
                 LibraryCollectionView(

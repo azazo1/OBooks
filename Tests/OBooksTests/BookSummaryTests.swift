@@ -46,6 +46,37 @@ final class BookSummaryTests: XCTestCase {
         XCTAssertEqual(restored.readingPosition, position)
     }
 
+    func testContinueReadingRemovalPersistsWithoutChangingBookData() throws {
+        var book = makeBook(progressFraction: 0.42)
+        book.readingPosition = ReadingPosition(spineID: "chapter-2", characterOffset: 1234)
+        book.toggleBookmark(at: try XCTUnwrap(book.readingPosition), title: "第二章", progressFraction: 0.42)
+        book.annotations = [ReaderAnnotation(
+            text: "标注", kind: "highlight", sectionIndex: 0, range: NSRange(location: 4, length: 2)
+        )]
+        book.lastOpenedAt = Date()
+        book.isFinished = true
+        let original = book
+        book.isHiddenFromContinueReading = true
+
+        var restored = try JSONDecoder().decode(BookSummary.self, from: JSONEncoder().encode(book))
+
+        XCTAssertTrue(restored.isHiddenFromContinueReading)
+        restored.isHiddenFromContinueReading = false
+        XCTAssertEqual(restored, original)
+    }
+
+    func testBookWithoutContinueReadingVisibilityDefaultsToVisible() throws {
+        let data = try JSONEncoder().encode(makeBook(progressFraction: 0.42))
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "isHiddenFromContinueReading")
+
+        let restored = try JSONDecoder().decode(
+            BookSummary.self, from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertFalse(restored.isHiddenFromContinueReading)
+    }
+
     func testBookmarksKeepTheirPositionsWhenReadingMovesAndRoundTrip() throws {
         var book = makeBook(progressFraction: 0.1)
         let firstPosition = ReadingPosition(spineID: "chapter-0", characterOffset: 120, viewportOffset: 18.5)

@@ -8,9 +8,10 @@ struct LibraryHomeView: View {
     let onImport: () -> Void
     let onDelete: (BookSummary) -> Void
     let onToggleFinished: (BookSummary) -> Void
+    let onRemoveFromContinueReading: (BookSummary) -> Void
 
     private var continueBooks: [BookSummary] {
-        books.sorted { lhs, rhs in
+        books.filter { !$0.isHiddenFromContinueReading }.sorted { lhs, rhs in
             (lhs.lastOpenedAt ?? lhs.importedAt) > (rhs.lastOpenedAt ?? rhs.importedAt)
         }.prefix(3).map { $0 }
     }
@@ -26,7 +27,7 @@ struct LibraryHomeView: View {
                 dailyReadingLine
                 shelfSection(title: "继续阅读") {
                     if continueBooks.isEmpty {
-                        emptyShelf
+                        emptyShelf(message: books.isEmpty ? "导入一本 EPUB, 开始你的阅读" : "暂无继续阅读的图书")
                     } else {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 18) {
@@ -35,7 +36,8 @@ struct LibraryHomeView: View {
                                         book: book,
                                         store: store,
                                         onDelete: { onDelete(book) },
-                                        onToggleFinished: { onToggleFinished(book) }
+                                        onToggleFinished: { onToggleFinished(book) },
+                                        onRemoveFromContinueReading: { onRemoveFromContinueReading(book) }
                                     ) { onOpen(book) }
                                 }
                             }
@@ -47,7 +49,7 @@ struct LibraryHomeView: View {
 
                 shelfSection(title: "之前读过", showsChevron: !books.isEmpty) {
                     if books.isEmpty {
-                        emptyShelf
+                        emptyShelf()
                     } else {
                         ScrollView(.horizontal) {
                             LazyHStack(spacing: 20) {
@@ -165,12 +167,12 @@ struct LibraryHomeView: View {
         }
     }
 
-    private var emptyShelf: some View {
+    private func emptyShelf(message: String = "导入一本 EPUB, 开始你的阅读") -> some View {
         HStack(spacing: 14) {
             Image(systemName: "book.closed")
                 .font(.system(size: 18))
                 .foregroundStyle(OBooksPalette.secondaryText)
-            Text("导入一本 EPUB, 开始你的阅读")
+            Text(message)
                 .font(.system(size: 13))
                 .foregroundStyle(OBooksPalette.secondaryText)
             Spacer()
@@ -190,6 +192,7 @@ private struct ContinueBookCard: View {
     let store: LibraryStore
     let onDelete: () -> Void
     let onToggleFinished: () -> Void
+    let onRemoveFromContinueReading: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -261,14 +264,16 @@ private struct ContinueBookCard: View {
             BookActionMenu(
                 isFinished: book.isFinished,
                 onToggleFinished: onToggleFinished,
-                onDelete: onDelete
+                onDelete: onDelete,
+                onRemoveFromContinueReading: onRemoveFromContinueReading
             )
             .padding(6)
         }
         .bookContextMenu(
             isFinished: book.isFinished,
             onToggleFinished: onToggleFinished,
-            onDelete: onDelete
+            onDelete: onDelete,
+            onRemoveFromContinueReading: onRemoveFromContinueReading
         )
     }
 }

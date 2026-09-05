@@ -99,11 +99,11 @@ final class AppModel: ObservableObject {
 
     func open(_ book: BookSummary) {
         selectedBookID = book.id
-        updateLastOpened(book.id)
         openReader(book)
     }
 
     func openReader(_ book: BookSummary) {
+        updateLastOpened(book.id)
         if let window = readerWindows[book.id] {
             AppWindowConfiguration.applyPrimaryStageBehavior(window)
             window.makeKeyAndOrderFront(nil)
@@ -212,6 +212,15 @@ final class AppModel: ObservableObject {
         logger.info("更新阅读完成状态: title=\(book.title, privacy: .public), finished=\(book.isFinished, privacy: .public)")
     }
 
+    func removeFromContinueReading(for bookID: UUID) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else {
+            return
+        }
+        books[index].isHiddenFromContinueReading = true
+        libraryStore.save(books)
+        logger.info("从继续阅读中移除: book=\(bookID)")
+    }
+
     private func scheduleProgressSave() {
         progressSaveTask?.cancel()
         progressSaveTask = Task { @MainActor [weak self] in
@@ -226,6 +235,7 @@ final class AppModel: ObservableObject {
             return
         }
         books[index].lastOpenedAt = Date()
+        books[index].isHiddenFromContinueReading = false
         libraryStore.save(books)
     }
 }

@@ -24,14 +24,28 @@ struct DeleteBookMenuItem: View {
     }
 }
 
+struct RemoveFromContinueReadingMenuItem: View {
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            Label("从继续阅读中移除", systemImage: "minus.circle")
+        }
+    }
+}
+
 struct BookActionMenu: View {
     let isFinished: Bool
     let onToggleFinished: () -> Void
     let onDelete: () -> Void
+    var onRemoveFromContinueReading: (() -> Void)? = nil
 
     var body: some View {
         Menu {
             FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
+            if let onRemoveFromContinueReading {
+                RemoveFromContinueReadingMenuItem(onRemove: onRemoveFromContinueReading)
+            }
             Divider()
             DeleteBookMenuItem(onDelete: onDelete)
         } label: {
@@ -54,10 +68,14 @@ extension View {
     func bookContextMenu(
         isFinished: Bool,
         onToggleFinished: @escaping () -> Void,
-        onDelete: @escaping () -> Void
+        onDelete: @escaping () -> Void,
+        onRemoveFromContinueReading: (() -> Void)? = nil
     ) -> some View {
         contextMenu {
             FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
+            if let onRemoveFromContinueReading {
+                RemoveFromContinueReadingMenuItem(onRemove: onRemoveFromContinueReading)
+            }
             DeleteBookMenuItem(onDelete: onDelete)
         }
     }
