@@ -41,15 +41,39 @@ struct SpeechSentenceList: View {
                                         .multilineTextAlignment(.center)
                                         .lineSpacing(5)
                                         .foregroundStyle(.primary.opacity(sentence.id == session.sentenceIndex ? 1 : sentence.id == candidate ? 0.8 : 0.45))
-                                        .frame(maxWidth: .infinity)
                                         .padding(.vertical, 10)
-                                        .padding(.horizontal, 5)
+                                        .padding(.leading, 5)
+                                        .padding(.trailing, candidate == sentence.id ? 88 : 5)
+                                        .frame(maxWidth: .infinity)
                                         .background(.primary.opacity(sentence.id == session.sentenceIndex ? 0.06 : 0))
                                         .clipShape(RoundedRectangle(cornerRadius: 5))
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel(sentence.text)
                                 .accessibilityValue(sentence.id == session.sentenceIndex ? "正在朗读" : "")
+                                .overlay(alignment: .trailing) {
+                                    if candidate == sentence.id {
+                                        HStack(spacing: 8) {
+                                            Text(candidateLabel(sentence.id))
+                                                .font(.system(size: 10).monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                            Button {
+                                                returnTask?.cancel()
+                                                browsing = false
+                                                candidate = nil
+                                                onPlay(sentence.id)
+                                            } label: {
+                                                Image(systemName: "play.fill").font(.system(size: 12))
+                                                    .frame(width: 30, height: 30)
+                                                    .background(.quaternary, in: Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .help("从这一句开始朗读")
+                                            .accessibilityLabel("从第 \(sentence.id + 1) 句开始朗读")
+                                        }
+                                        .padding(.trailing, 8)
+                                    }
+                                }
                                 .background(GeometryReader { row in
                                     Color.clear.preference(key: SentenceFrames.self,
                                         value: [sentence.id: row.frame(in: .named("speechSentences"))])
@@ -72,28 +96,6 @@ struct SpeechSentenceList: View {
                         if browsing, !clickedCandidate { chooseCenter(height: geometry.size.height) }
                     }
 
-                    if let candidate, session.sentences.indices.contains(candidate) {
-                        HStack {
-                            Text(candidateLabel(candidate))
-                                .font(.system(size: 10).monospacedDigit())
-                                .foregroundStyle(.secondary)
-                                .frame(width: 46)
-                            Spacer(minLength: 0)
-                            Button {
-                                returnTask?.cancel()
-                                browsing = false
-                                self.candidate = nil
-                                onPlay(candidate)
-                            } label: {
-                                Image(systemName: "play.fill").font(.system(size: 12))
-                                    .frame(width: 30, height: 30)
-                                    .background(.quaternary, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("从这一句开始朗读")
-                            .accessibilityLabel("从第 \(candidate + 1) 句开始朗读")
-                        }
-                    }
                 }
                 .onChange(of: session.sentenceIndex) { _, index in
                     guard !browsing else { return }
