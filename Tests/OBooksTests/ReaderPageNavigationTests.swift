@@ -4,6 +4,29 @@ import XCTest
 
 @MainActor
 final class ReaderPageNavigationTests: XCTestCase {
+    func testOpeningSavedPositionKeepsPageAndAllowsFurtherTurns() async throws {
+        let position = ReadingPosition(spineID: "chapter-0", characterOffset: 1500)
+        let reader = try Fixture(position: position)
+        defer { reader.close() }
+        let restoredOffset = try XCTUnwrap(reader.textView.pageOffset(forCharacter: position.characterOffset))
+        XCTAssertGreaterThan(restoredOffset, 0)
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, restoredOffset)
+        reader.textView.setFrameSize(reader.scrollView.contentSize)
+        try await Task.sleep(for: .milliseconds(30))
+        reader.update()
+        reader.window.contentView?.layoutSubtreeIfNeeded()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, restoredOffset)
+
+        for page in 1...2 {
+            XCTAssertTrue(reader.scrollView.turnPage(direction: 1))
+            reader.scrollView.prepareForProgrammaticScroll()
+            try await Task.sleep(for: .milliseconds(30))
+            reader.update()
+            XCTAssertEqual(reader.scrollView.contentView.bounds.minY, restoredOffset + CGFloat(page) * 600)
+            XCTAssertEqual(reader.positions.last?.characterOffset, reader.textView.visibleCharacterLocation())
+        }
+    }
+
     func testChapterBoundaryAndReverseTurnRestoreExactPage() async throws {
         let reader = try Fixture()
         defer { reader.close() }
@@ -149,11 +172,18 @@ final class ReaderPageNavigationTests: XCTestCase {
         let coordinator = NativeReaderView.Coordinator()
         let scrollView = ReaderScrollView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         let textView = ReaderTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        let window: NSWindow
         let book: BookSummary
         var section = 0
         var positions: [ReadingPosition] = []
+        var pendingPosition: ReadingPosition?
 
-        init() throws {
+        init(position: ReadingPosition? = nil) throws {
+            _ = NSApplication.shared
+            window = NSWindow(contentRect: scrollView.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = scrollView
+            pendingPosition = position
             book = BookSummary(
                 id: UUID(), title: "分页测试", authors: [], sortTitle: "test",
                 sourceFileName: "test.epub", folderName: "pagination-test-" + UUID().uuidString,
@@ -170,10 +200,18 @@ final class ReaderPageNavigationTests: XCTestCase {
             scrollView.wantsLayer = true
             scrollView.layer?.masksToBounds = true
             scrollView.borderType = .noBorder
+            scrollView.contentView.wantsLayer = true
+            textView.wantsLayer = true
             textView.isEditable = false
+            textView.isSelectable = true
+            textView.isVerticallyResizable = true
             textView.isHorizontallyResizable = false
             textView.autoresizingMask = [.width]
+            textView.minSize = NSSize(width: 0, height: 600)
             textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            textView.textContainer?.containerSize = NSSize(width: 900, height: CGFloat.greatestFiniteMagnitude)
+            textView.textContainer?.widthTracksTextView = true
+            textView.textContainer?.lineFragmentPadding = 0
             scrollView.documentView = textView
             coordinator.attach(scrollView: scrollView, textView: textView)
             update()
@@ -181,7 +219,7 @@ final class ReaderPageNavigationTests: XCTestCase {
 
         func update(fontSize: Double = 18, flow: ReaderFlowMode = .paging(orientation: .horizontal, columns: .single)) {
             coordinator.update(
-                book: book, sectionIndex: section, pendingAnchor: nil, pendingPosition: nil,
+                book: book, sectionIndex: section, pendingAnchor: nil, pendingPosition: pendingPosition,
                 pendingPositionAnimated: false, theme: .paper,
                 flow: flow,
                 fontSize: fontSize, lineHeight: 1.7, margin: 56, annotations: [],
@@ -192,13 +230,14 @@ final class ReaderPageNavigationTests: XCTestCase {
                     self?.section = index
                     self?.update()
                 },
-                onAnchorConsumed: {}, onPositionConsumed: {}
+                onAnchorConsumed: {}, onPositionConsumed: { [weak self] in self?.pendingPosition = nil }
             )
             coordinator.loadSectionIfNeeded()
         }
 
         func close() {
             coordinator.teardown()
+            window.close()
             try? FileManager.default.removeItem(at: book.folderURL)
         }
     }

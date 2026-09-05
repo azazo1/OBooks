@@ -17,7 +17,7 @@ final class ReaderTextView: NSTextView {
     private var pageColumnFrames: [NSRect] = []
     private var isUpdatingPageLayout = false
     private var selectionAnchorLocation: Int?
-    private var isSelectingAcrossColumns = false
+    private var isSelectingPageText = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -48,7 +48,12 @@ final class ReaderTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(frame.width - newSize.width) > 0.5
-        super.setFrameSize(newSize)
+        var documentSize = newSize
+        if pageColumns > 0, !isUpdatingPageLayout, !pageColumnFrames.isEmpty {
+            // 原生尺寸调整只了解首个文本容器, 分页高度必须由完整页数决定.
+            documentSize.height = CGFloat(pageCount) * pageViewportHeight
+        }
+        super.setFrameSize(documentSize)
         updateReadingInsets(for: newSize.width)
         if widthChanged && !isUpdatingPageLayout {
             updateDocumentHeight(minimumHeight: superview?.bounds.height ?? 0)
@@ -226,7 +231,8 @@ final class ReaderTextView: NSTextView {
                 return
             }
         }
-        guard pageColumns > 1 else {
+        // 单栏和双栏都按分页容器绘制, 选择位置也必须使用对应容器的坐标.
+        guard pageColumns > 0 else {
             super.mouseDown(with: event)
             return
         }
@@ -234,22 +240,21 @@ final class ReaderTextView: NSTextView {
             onLink?(link)
             return
         }
-        guard pageColumns > 1,
-              event.clickCount == 1,
+        guard event.clickCount == 1,
               event.type == .leftMouseDown else {
             super.mouseDown(with: event)
             return
         }
         let location = characterLocation(for: event)
         selectionAnchorLocation = location
-        isSelectingAcrossColumns = true
+        isSelectingPageText = true
         window?.makeFirstResponder(self)
-        updateCrossColumnSelection(NSRange(location: location, length: 0))
+        updatePageSelection(NSRange(location: location, length: 0))
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard pageColumns > 1,
-              isSelectingAcrossColumns,
+        guard pageColumns > 0,
+              isSelectingPageText,
               let anchor = selectionAnchorLocation else {
             super.mouseDragged(with: event)
             return
@@ -259,24 +264,24 @@ final class ReaderTextView: NSTextView {
             location: min(anchor, location),
             length: abs(location - anchor)
         )
-        updateCrossColumnSelection(range)
+        updatePageSelection(range)
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard pageColumns > 1,
-              isSelectingAcrossColumns else {
+        guard pageColumns > 0,
+              isSelectingPageText else {
             super.mouseUp(with: event)
             return
         }
         let location = characterLocation(for: event)
         if let anchor = selectionAnchorLocation {
-            updateCrossColumnSelection(NSRange(
+            updatePageSelection(NSRange(
                 location: min(anchor, location),
                 length: abs(location - anchor)
             ))
         }
         selectionAnchorLocation = nil
-        isSelectingAcrossColumns = false
+        isSelectingPageText = false
     }
 
     override func resetCursorRects() {
@@ -429,7 +434,7 @@ final class ReaderTextView: NSTextView {
         }
     }
 
-    private func updateCrossColumnSelection(_ range: NSRange) {
+    private func updatePageSelection(_ range: NSRange) {
         let length = (string as NSString).length
         let clampedLocation = min(max(range.location, 0), length)
         let clampedLength = min(max(range.length, 0), length - clampedLocation)

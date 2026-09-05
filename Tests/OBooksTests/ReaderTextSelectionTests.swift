@@ -44,29 +44,36 @@ final class ReaderTextSelectionTests: XCTestCase {
     }
 
     func testMouseDragSelectsTextInEachPageColumn() throws {
-        for width: CGFloat in [900, 1180] {
-            let fixture = Fixture(columns: 2, width: width)
-            defer { fixture.window.close() }
-            let manager = try XCTUnwrap(fixture.textView.layoutManager)
-            for containerIndex in 0..<4 {
-                let container = manager.textContainers[containerIndex]
-                let glyphRange = manager.glyphRange(for: container)
-                let start = manager.characterIndexForGlyph(at: glyphRange.location + 2)
-                let end = manager.characterIndexForGlyph(at: glyphRange.location + 10)
-                fixture.scrollView.scroll(to: CGFloat(containerIndex / 2) * 600, animated: false)
+        for columns in [1, 2] {
+            for width: CGFloat in [900, 1180] {
+                let fixture = Fixture(columns: columns, width: width)
+                defer { fixture.window.close() }
+                let manager = try XCTUnwrap(fixture.textView.layoutManager)
+                for containerIndex in 0..<(columns * 2) {
+                    let container = manager.textContainers[containerIndex]
+                    let glyphRange = manager.glyphRange(for: container)
+                    let start = manager.characterIndexForGlyph(at: glyphRange.location + 2)
+                    let end = manager.characterIndexForGlyph(at: glyphRange.location + 10)
+                    fixture.scrollView.scroll(to: CGFloat(containerIndex / columns) * 600, animated: false)
 
-                let startPoint = fixture.point(forGlyph: glyphRange.location + 2, containerIndex: containerIndex)
-                let endPoint = fixture.point(forGlyph: glyphRange.location + 10, containerIndex: containerIndex)
-                let target = try fixture.hitView(at: startPoint)
-                XCTAssertTrue(target === fixture.textView)
-                target.mouseDown(with: try fixture.event(.leftMouseDown, at: startPoint))
-                XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: start, length: 0))
-                target.mouseDragged(with: try fixture.event(.leftMouseDragged, at: endPoint))
-                XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: start, length: end - start),
-                               "container=\(containerIndex), width=\(width), dragging")
-                target.mouseUp(with: try fixture.event(.leftMouseUp, at: endPoint))
-                XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: start, length: end - start),
-                               "container=\(containerIndex), width=\(width), released")
+                    let startPoint = fixture.point(forGlyph: glyphRange.location + 2, containerIndex: containerIndex)
+                    let endPoint = fixture.point(forGlyph: glyphRange.location + 10, containerIndex: containerIndex)
+                    for (anchorPoint, draggedPoint, anchor) in [
+                        (startPoint, endPoint, start),
+                        (endPoint, startPoint, end)
+                    ] {
+                        let target = try fixture.hitView(at: anchorPoint)
+                        XCTAssertTrue(target === fixture.textView)
+                        target.mouseDown(with: try fixture.event(.leftMouseDown, at: anchorPoint))
+                        XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: anchor, length: 0))
+                        target.mouseDragged(with: try fixture.event(.leftMouseDragged, at: draggedPoint))
+                        XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: start, length: end - start),
+                                       "columns=\(columns), container=\(containerIndex), width=\(width), anchor=\(anchor), dragging")
+                        target.mouseUp(with: try fixture.event(.leftMouseUp, at: draggedPoint))
+                        XCTAssertEqual(fixture.textView.selectedRange(), NSRange(location: start, length: end - start),
+                                       "columns=\(columns), container=\(containerIndex), width=\(width), anchor=\(anchor), released")
+                    }
+                }
             }
         }
     }

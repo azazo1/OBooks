@@ -4,6 +4,20 @@ import XCTest
 
 @MainActor
 final class ReaderPaginationTests: XCTestCase {
+    func testFrameResizePreservesPagedDocumentHeight() throws {
+        for columns in [1, 2] {
+            let view = makeTextView()
+            view.configurePageColumns(columns, viewportHeight: 600)
+            let documentHeight = CGFloat(view.pageCount) * 600
+            XCTAssertGreaterThan(documentHeight, 600)
+
+            view.sizeToFit()
+            view.setFrameSize(NSSize(width: view.frame.width, height: 600))
+
+            XCTAssertEqual(view.frame.height, documentHeight, "columns=\(columns)")
+        }
+    }
+
     func testPagesCoverEveryCharacterOnceAndUseExactViewportSteps() throws {
         for columns in [1, 2] {
             let view = makeTextView()
