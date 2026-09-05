@@ -87,18 +87,14 @@ struct ReadingGoalCard: View {
                 }
             }
         } label: {
-            HStack(spacing: 5) {
-                Text(selectedBook?.title ?? "选择书籍")
-                    .lineLimit(1)
-                    .frame(maxWidth: 180, alignment: .leading)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white.opacity(0.78))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Color.white.opacity(0.08), in: Capsule())
+            Text(selectedBook?.title ?? "选择书籍")
+                .lineLimit(1)
+                .frame(maxWidth: 180, alignment: .leading)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.08), in: Capsule())
         }
         .menuStyle(.borderlessButton)
         .disabled(books.isEmpty)
