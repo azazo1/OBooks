@@ -25,7 +25,7 @@ struct NativeReaderView: NSViewRepresentable {
     var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
     var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
-    var onImageClick: (NSImage) -> Void = { _ in }
+    var onImageClick: (NSImage, NSRect) -> Void = { _, _ in }
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
@@ -184,7 +184,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
         private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
-        private var onImageClick: (NSImage) -> Void = { _ in }
+        private var onImageClick: (NSImage, NSRect) -> Void = { _, _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
@@ -269,8 +269,8 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onLink = { [weak self] url in
                 self?.openLink(url)
             }
-            textView.onImageClick = { [weak self] image in
-                self?.onImageClick(image)
+            textView.onImageClick = { [weak self] image, rect in
+                self?.onImageClick(image, rect)
             }
 
             scrollView.contentView.postsBoundsChangedNotifications = true
@@ -307,7 +307,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick: @escaping (ReaderAnnotation) -> Void = { _ in },
             onAnnotationAtSection: @escaping (String, String, Int, NSRange) -> Void = { _, _, _, _ in },
             onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
-            onImageClick: @escaping (NSImage) -> Void = { _ in },
+            onImageClick: @escaping (NSImage, NSRect) -> Void = { _, _ in },
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
             onPositionConsumed: @escaping () -> Void
@@ -576,7 +576,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick = { _ in }
             onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
-            onImageClick = { _ in }
+            onImageClick = { _, _ in }
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
             onPositionConsumed = {}

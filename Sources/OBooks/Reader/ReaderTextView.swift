@@ -9,7 +9,7 @@ final class ReaderTextView: NSTextView {
     var onRemoveAnnotation: ((UUID) -> Void)?
     var onSpeak: ((Int) -> Void)?
     var onLink: ((URL) -> Void)?
-    var onImageClick: ((NSImage) -> Void)?
+    var onImageClick: ((NSImage, NSRect) -> Void)?
     var preferredReadingWidth: CGFloat = 820
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
@@ -231,8 +231,8 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 1, let image = image(at: event) {
-            onImageClick?(image)
+        if event.clickCount == 1, let hit = imageHit(at: event) {
+            onImageClick?(hit.image, hit.rect)
             return
         }
         if pageColumns > 0, event.clickCount == 1,
@@ -395,7 +395,7 @@ final class ReaderTextView: NSTextView {
         let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
         guard characterIndex < textStorage.length,
               textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil else {
-            if image(at: event) != nil {
+            if imageHit(at: event) != nil {
                 NSCursor.pointingHand.set()
             }
             return
@@ -421,7 +421,7 @@ final class ReaderTextView: NSTextView {
         return link
     }
 
-    private func image(at event: NSEvent) -> NSImage? {
+    private func imageHit(at event: NSEvent) -> (image: NSImage, rect: NSRect)? {
         guard let layoutManager, let textStorage else { return nil }
         let point = convert(event.locationInWindow, from: nil)
         guard let (textContainer, origin) = textContainerContext(at: point) else { return nil }
@@ -441,7 +441,9 @@ final class ReaderTextView: NSTextView {
               let attachment = textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) as? NSTextAttachment else {
             return nil
         }
-        return attachment.image
+        guard let image = attachment.image else { return nil }
+        let viewRect = glyphRect.offsetBy(dx: origin.x, dy: origin.y)
+        return (image, convert(viewRect, to: nil))
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)

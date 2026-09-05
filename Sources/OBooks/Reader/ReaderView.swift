@@ -108,6 +108,7 @@ struct ReaderView: View {
     @State private var editingAnnotationID: UUID?
     @State private var noteEditorSource: NoteEditorSource?
     @State private var activeImage: NSImage?
+    @State private var activeImageRect: NSRect?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -206,10 +207,11 @@ struct ReaderView: View {
                 onRemoveAnnotation: { id in
                     removeAnnotation(id: id)
                 },
-                onImageClick: { image in
+                onImageClick: { image, rect in
                     activeImage = image
+                    activeImageRect = rect
                     hideChromeTask?.cancel()
-                    chromeVisible = true
+                    chromeVisible = false
                 },
                 onNavigate: { index, anchor in
                     registerJump()
@@ -246,15 +248,20 @@ struct ReaderView: View {
             }
         }
         .overlay {
-            ReaderMouseTracker(chromeVisible: chromeVisible, edgeThreshold: 88) { isNear in
+            ReaderMouseTracker(
+                chromeVisible: chromeVisible,
+                edgeThreshold: 88,
+                cornerOnly: activeImage != nil
+            ) { isNear in
                 updateChromeProximity(isNear)
             }
             .allowsHitTesting(false)
         }
         .overlay {
-            if let activeImage {
-                ReaderImageViewer(image: activeImage) {
+            if let activeImage, let activeImageRect {
+                ReaderImageViewer(image: activeImage, sourceRect: activeImageRect) {
                     self.activeImage = nil
+                    self.activeImageRect = nil
                     scheduleChromeHide(after: .milliseconds(650))
                 }
             }
@@ -298,10 +305,12 @@ struct ReaderView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             activePanel = nil
             activeImage = nil
+            activeImageRect = nil
         }
         .onDisappear {
             activePanel = nil
             activeImage = nil
+            activeImageRect = nil
             hideChromeTask?.cancel()
             progressState.flush()
         }

@@ -3,12 +3,15 @@ import SwiftUI
 
 struct ReaderImageViewer: View {
     let image: NSImage
+    let sourceRect: NSRect
     let onClose: () -> Void
 
     @State private var zoom: CGFloat = 1
     @State private var offset = CGSize.zero
     @State private var magnificationStart: CGFloat?
     @State private var dragStart: CGSize?
+    @State private var presentationProgress: CGFloat = 0
+    @State private var isClosing = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -25,20 +28,35 @@ struct ReaderImageViewer: View {
                 width: baseSize.width * zoom,
                 height: baseSize.height * zoom
             )
+            let targetRect = CGRect(
+                x: (geometry.size.width - displayedSize.width) / 2 + offset.width,
+                y: (geometry.size.height - displayedSize.height) / 2 + offset.height,
+                width: displayedSize.width,
+                height: displayedSize.height
+            )
+            let localSourceRect = CGRect(
+                x: sourceRect.minX,
+                y: geometry.size.height - sourceRect.maxY,
+                width: max(1, sourceRect.width),
+                height: max(1, sourceRect.height)
+            )
+            let visibleRect = interpolatedRect(from: localSourceRect, to: targetRect, progress: presentationProgress)
 
             ZStack {
                 Color.black.opacity(0.94)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: onClose)
+                    .onTapGesture(perform: requestClose)
 
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: displayedSize.width, height: displayedSize.height)
-                    .offset(offset)
+                    .frame(width: visibleRect.width, height: visibleRect.height)
+                    .position(x: visibleRect.midX, y: visibleRect.midY)
+                    .opacity(max(0.05, presentationProgress))
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
+                        guard presentationProgress > 0.99, !isClosing else { return }
                         withAnimation(.easeOut(duration: 0.18)) {
                             if zoom > 1.01 {
                                 zoom = 1
@@ -51,7 +69,7 @@ struct ReaderImageViewer: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                guard zoom > 1.001 else { return }
+                                guard presentationProgress > 0.99, zoom > 1.001, !isClosing else { return }
                                 if dragStart == nil {
                                     dragStart = offset
                                 }
@@ -65,17 +83,20 @@ struct ReaderImageViewer: View {
                                 )
                             }
                             .onEnded { _ in
-                                offset = clampedOffset(
-                                    offset,
-                                    displayedSize: displayedSize,
-                                    contentSize: contentSize
-                                )
+                                withAnimation(.easeOut(duration: 0.16)) {
+                                    offset = clampedOffset(
+                                        offset,
+                                        displayedSize: displayedSize,
+                                        contentSize: contentSize
+                                    )
+                                }
                                 dragStart = nil
                             }
                     )
                     .simultaneousGesture(
                         MagnificationGesture()
                             .onChanged { value in
+                                guard presentationProgress > 0.99, !isClosing else { return }
                                 if magnificationStart == nil {
                                     magnificationStart = zoom
                                 }
@@ -96,51 +117,62 @@ struct ReaderImageViewer: View {
                     )
 
                 VStack(spacing: 0) {
-                    HStack(spacing: 10) {
+                    ZStack {
                         Text("图片预览")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.86))
-                        Spacer()
-                        Text("\(Int(zoom * 100))%")
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.55))
-                        Button(action: onClose) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white.opacity(0.82))
-                                .frame(width: 28, height: 28)
+                        HStack(spacing: 10) {
+                            Spacer()
+                            Text("\(Int(zoom * 100))%")
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(.white.opacity(0.55))
+                            Button(action: requestClose) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.82))
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.plain)
+                            .background(Color.white.opacity(0.12), in: Circle())
+                            .help("关闭图片预览")
                         }
-                        .buttonStyle(.plain)
-                        .background(Color.white.opacity(0.12), in: Circle())
-                        .help("关闭图片预览")
+                        .padding(.horizontal, 18)
                     }
-                    .padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(.black.opacity(0.28))
+                    .background(.black.opacity(0.28 * presentationProgress))
                     Spacer()
                 }
+                .opacity(presentationProgress)
                 .allowsHitTesting(true)
 
                 ReaderImageViewerEventMonitor { delta in
                     let step = max(-0.65, min(0.65, delta * 0.012))
-                    zoom = clampedZoom(zoom + step, fitScale: fitScale)
-                    offset = clampedOffset(
-                        offset,
-                        displayedSize: CGSize(
-                            width: baseSize.width * zoom,
-                            height: baseSize.height * zoom
-                        ),
-                        contentSize: contentSize
-                    )
+                    guard presentationProgress > 0.99, !isClosing else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        zoom = clampedZoom(zoom + step, fitScale: fitScale)
+                        offset = clampedOffset(
+                            offset,
+                            displayedSize: CGSize(
+                                width: baseSize.width * zoom,
+                                height: baseSize.height * zoom
+                            ),
+                            contentSize: contentSize
+                        )
+                    }
                 }
                 .frame(width: 1, height: 1)
             }
             .onAppear {
                 zoom = 1
                 offset = .zero
+                presentationProgress = 0
+                withAnimation(.easeInOut(duration: 0.34)) {
+                    presentationProgress = 1
+                }
             }
         }
-        .onExitCommand(perform: onClose)
+        .onExitCommand(perform: requestClose)
     }
 
     private func fitScale(for contentSize: CGSize) -> CGFloat {
@@ -164,6 +196,27 @@ struct ReaderImageViewer: View {
             width: min(horizontalLimit, max(-horizontalLimit, value.width)),
             height: min(verticalLimit, max(-verticalLimit, value.height))
         )
+    }
+
+    private func interpolatedRect(from: CGRect, to: CGRect, progress: CGFloat) -> CGRect {
+        let value = min(1, max(0, progress))
+        return CGRect(
+            x: from.minX + (to.minX - from.minX) * value,
+            y: from.minY + (to.minY - from.minY) * value,
+            width: from.width + (to.width - from.width) * value,
+            height: from.height + (to.height - from.height) * value
+        )
+    }
+
+    private func requestClose() {
+        guard !isClosing else { return }
+        isClosing = true
+        withAnimation(.easeInOut(duration: 0.3)) {
+            presentationProgress = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+            onClose()
+        }
     }
 }
 

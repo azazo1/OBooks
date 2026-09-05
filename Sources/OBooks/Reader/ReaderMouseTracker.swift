@@ -4,12 +4,14 @@ import SwiftUI
 struct ReaderMouseTracker: NSViewRepresentable {
     let chromeVisible: Bool
     let edgeThreshold: CGFloat
+    var cornerOnly = false
     let onProximityChange: (Bool) -> Void
 
     func makeNSView(context: Context) -> TrackingView {
         let view = TrackingView()
         view.chromeVisible = chromeVisible
         view.edgeThreshold = edgeThreshold
+        view.cornerOnly = cornerOnly
         view.onProximityChange = onProximityChange
         return view
     }
@@ -17,6 +19,7 @@ struct ReaderMouseTracker: NSViewRepresentable {
     func updateNSView(_ nsView: TrackingView, context: Context) {
         nsView.chromeVisible = chromeVisible
         nsView.edgeThreshold = edgeThreshold
+        nsView.cornerOnly = cornerOnly
         nsView.onProximityChange = onProximityChange
         nsView.applyChromeVisibility()
     }
@@ -24,6 +27,7 @@ struct ReaderMouseTracker: NSViewRepresentable {
     final class TrackingView: NSView {
         var chromeVisible = true
         var edgeThreshold: CGFloat = 84
+        var cornerOnly = false
         var onProximityChange: ((Bool) -> Void)?
         private var eventMonitor: Any?
         private var lastValue: Bool?
@@ -73,6 +77,14 @@ struct ReaderMouseTracker: NSViewRepresentable {
                 return
             }
             let location = convert(event.locationInWindow, from: nil)
+            if cornerOnly {
+                report(
+                    bounds.contains(location)
+                        && location.x <= edgeThreshold
+                        && location.y >= bounds.maxY - edgeThreshold
+                )
+                return
+            }
             let verticalDistance = min(abs(location.y - bounds.minY), abs(bounds.maxY - location.y))
             report(bounds.contains(location) && verticalDistance <= edgeThreshold)
         }
