@@ -17,7 +17,6 @@ final class ReaderTextView: NSTextView {
     private var verticalInset: CGFloat = 52
     private var contextLocation = 0
     private var contextAnnotationID: UUID?
-    private var cursorTrackingArea: NSTrackingArea?
     private var pageColumns = 0
     private(set) var pageViewportHeight: CGFloat = 0
     private(set) var pageCount = 1
@@ -27,10 +26,16 @@ final class ReaderTextView: NSTextView {
     private var isSelectingPageText = false
     private var pendingImageHit: (image: NSImage, rect: NSRect)?
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.invalidateCursorRects(for: self)
+    }
+
     func setReadingInsets(horizontal: CGFloat, vertical: CGFloat) {
         minimumHorizontalInset = horizontal
         verticalInset = vertical
         updateReadingInsets(for: bounds.width)
+        window?.invalidateCursorRects(for: self)
     }
 
     func updateDocumentHeight(minimumHeight: CGFloat) {
@@ -44,6 +49,7 @@ final class ReaderTextView: NSTextView {
         let requiredHeight = max(minimumHeight, ceil(usedRect.maxY + verticalInset * 2))
         guard abs(frame.height - requiredHeight) > 0.5 else { return }
         super.setFrameSize(NSSize(width: frame.width, height: requiredHeight))
+        window?.invalidateCursorRects(for: self)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -58,6 +64,7 @@ final class ReaderTextView: NSTextView {
         if widthChanged && !isUpdatingPageLayout {
             updateDocumentHeight(minimumHeight: superview?.bounds.height ?? 0)
         }
+        window?.invalidateCursorRects(for: self)
     }
 
     func configurePageColumns(_ columns: Int, viewportHeight: CGFloat) {
@@ -330,74 +337,86 @@ final class ReaderTextView: NSTextView {
     }
 
     override func resetCursorRects() {
-        // 不调用 super, 也不注册 cursor rect, 避免静态矩形穿透 SwiftUI 浮层.
+        // 不调用 super, 避免 NSTextView 默认把整片文本区域都设成 I-beam.
+        visitDeclaredCursorRects { rect, cursor in
+            self.addCursorRect(rect, cursor: cursor)
+        }
     }
 
-    override func updateTrackingAreas() {
-        if let cursorTrackingArea {
-            removeTrackingArea(cursorTrackingArea)
-        }
-        super.updateTrackingAreas()
-        let trackingArea = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
-        cursorTrackingArea = trackingArea
+    override func cursorUpdate(with event: NSEvent) {
+        // 不调用 super, 跳过 NSTextView 默认 I-beam.
+        applyDeclaredCursor(at: event)
     }
 
     override func mouseMoved(with event: NSEvent) {
-        let hitView = window?.contentView?.hitTest(event.locationInWindow)
-        guard hitView === self else { return }
+        // 不调用 super, 跳过 NSTextView 默认 I-beam.
+        applyDeclaredCursor(at: event)
+    }
 
-        guard let layoutManager, let textStorage else {
-            NSCursor.arrow.set()
-            return
-        }
+    override func mouseEntered(with event: NSEvent) {
+        // 不调用 super, 跳过 NSTextView 默认 I-beam.
+        applyDeclaredCursor(at: event)
+    }
+
+    private func applyDeclaredCursor(at event: NSEvent) {
+        let hitView = window?.contentView?.hitTest(event.locationInWindow)
+        guard hitView === self || (hitView?.isDescendant(of: self) ?? false) else { return }
+
         let point = convert(event.locationInWindow, from: nil)
-        guard let (textContainer, origin) = textContainerContext(at: point) else {
-            NSCursor.arrow.set()
-            return
-        }
-        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
-        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
-        let containerGlyphRange = layoutManager.glyphRange(for: textContainer)
-        guard containerGlyphRange.length > 0,
-              glyphIndex >= containerGlyphRange.location,
-              glyphIndex < NSMaxRange(containerGlyphRange) else {
-            NSCursor.arrow.set()
-            return
-        }
-        let glyphRect = layoutManager.boundingRect(
-            forGlyphRange: NSRange(location: glyphIndex, length: 1),
-            in: textContainer
-        )
-        guard glyphRect.contains(containerPoint) else {
-            NSCursor.arrow.set()
-            return
-        }
-        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
-        guard characterIndex < textStorage.length else {
-            NSCursor.arrow.set()
-            return
-        }
-        if textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) is NSTextAttachment {
-            if allowsImagePreview {
-                NSCursor.pointingHand.set()
-            } else {
-                NSCursor.arrow.set()
+        var cursor = NSCursor.arrow
+        visitDeclaredCursorRects { rect, declared in
+            if rect.contains(point) {
+                cursor = declared
             }
-            return
         }
-        let character = (textStorage.string as NSString).substring(
-            with: NSRange(location: characterIndex, length: 1)
-        )
-        if character.rangeOfCharacter(from: .whitespacesAndNewlines) == nil {
-            NSCursor.iBeam.set()
-        } else {
-            NSCursor.arrow.set()
+        cursor.set()
+    }
+
+    private func visitDeclaredCursorRects(_ visit: @escaping (NSRect, NSCursor) -> Void) {
+        visit(visibleRect, .arrow)
+        guard let layoutManager, let textStorage else { return }
+        guard !visibleRect.isEmpty else { return }
+
+        for (index, textContainer) in layoutManager.textContainers.enumerated() {
+            let origin = pageColumnFrames.indices.contains(index)
+                ? pageColumnFrames[index].origin
+                : textContainerOrigin
+            let visibleContainerRect = visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
+            let glyphRange = layoutManager.glyphRange(
+                forBoundingRect: visibleContainerRect,
+                in: textContainer
+            )
+            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { continue }
+
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) {
+                _, usedRect, container, _, _ in
+                guard container === textContainer, !usedRect.isEmpty else { return }
+                let lineRect = usedRect.offsetBy(dx: origin.x, dy: origin.y).intersection(self.visibleRect)
+                guard !lineRect.isEmpty else { return }
+                visit(lineRect, .iBeam)
+            }
+
+            guard allowsImagePreview else { continue }
+            let characterRange = layoutManager.characterRange(
+                forGlyphRange: glyphRange,
+                actualGlyphRange: nil
+            )
+            textStorage.enumerateAttribute(.attachment, in: characterRange) {
+                value, range, _ in
+                guard value is NSTextAttachment else { return }
+                let attachmentGlyphRange = layoutManager.glyphRange(
+                    forCharacterRange: range,
+                    actualCharacterRange: nil
+                )
+                let attachmentRect = layoutManager.boundingRect(
+                    forGlyphRange: attachmentGlyphRange,
+                    in: textContainer
+                )
+                guard !attachmentRect.isEmpty else { return }
+                let viewRect = attachmentRect.offsetBy(dx: origin.x, dy: origin.y).intersection(self.visibleRect)
+                guard !viewRect.isEmpty else { return }
+                visit(viewRect, .pointingHand)
+            }
         }
     }
 
@@ -541,6 +560,7 @@ final class ReaderTextView: NSTextView {
             super.setFrameSize(NSSize(width: frame.width, height: layout.documentHeight))
         }
         needsDisplay = true
+        window?.invalidateCursorRects(for: self)
     }
 
     private func drawSelectionBackground(

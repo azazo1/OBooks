@@ -27,6 +27,10 @@ struct SpeechPlayerOverlay: View {
                 .frame(width: size.width, height: size.height)
                 .background(Color(nsColor: NativeReaderAppearance(theme: theme).background).opacity(0.98))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    SystemCursorBarrier()
+                        .allowsHitTesting(false)
+                }
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.15), lineWidth: 1))
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
                 .foregroundStyle(Color(nsColor: NativeReaderAppearance(theme: theme).foreground))
