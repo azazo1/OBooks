@@ -124,7 +124,7 @@ jobs:
   build:
     name: 构建 macOS ${{ matrix.arch }}
     needs: version
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -139,6 +139,13 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
+
+      - name: 检查 Apple 工具链
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift --version
 
       - name: 恢复 SwiftPM 缓存
         uses: actions/cache@v4
