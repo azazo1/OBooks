@@ -63,6 +63,7 @@ struct ReaderImageViewer: View {
                         } label: {
                             Label("导出图片...", systemImage: "square.and.arrow.up")
                         }
+                        .labelStyle(.titleAndIcon)
                     }
                     .onTapGesture(count: 2) {
                         guard presentationProgress > 0.99, !isClosing else { return }
