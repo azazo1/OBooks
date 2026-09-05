@@ -73,44 +73,31 @@ struct ReaderImageViewer: View {
                         zoom = metrics.clampedZoom(zoom * (1 + magnification))
                         offset = metrics.clampedOffset(offset, zoom: zoom)
                     },
+                    onScroll: { event in
+                        let effect = ReaderImagePreviewMetrics.scrollEffect(
+                            deltaX: event.scrollingDeltaX,
+                            deltaY: event.scrollingDeltaY,
+                            command: event.modifierFlags.contains(.command),
+                            shift: event.modifierFlags.contains(.shift)
+                        )
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            if effect.zoomStep != 0 {
+                                zoom = metrics.clampedZoom(zoom + effect.zoomStep)
+                            }
+                            if effect.pan != .zero {
+                                offset = metrics.clampedOffset(
+                                    CGSize(
+                                        width: offset.width + effect.pan.width,
+                                        height: offset.height + effect.pan.height
+                                    ),
+                                    zoom: zoom
+                                )
+                            }
+                        }
+                    },
                     onExport: { ReaderImageExporter.export(image) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                ReaderImageViewerEventMonitor { event in
-                    guard isInteractive else { return }
-                    let x = event.scrollingDeltaX
-                    let y = event.scrollingDeltaY
-                    let isZooming = event.modifierFlags.contains(.command)
-                    let isShifted = event.modifierFlags.contains(.shift)
-
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        if isZooming {
-                            let delta = y != 0 ? y : x
-                            let step = max(-0.65, min(0.65, delta * 0.012))
-                            zoom = metrics.clampedZoom(zoom + step)
-                        } else {
-                            let horizontalDelta: CGFloat
-                            if abs(x) > 0.01 {
-                                horizontalDelta = x
-                            } else if isShifted {
-                                horizontalDelta = y
-                            } else {
-                                horizontalDelta = 0
-                            }
-                            let verticalDelta = isShifted ? 0 : y
-                            offset = metrics.clampedOffset(
-                                CGSize(
-                                    width: offset.width + horizontalDelta,
-                                    height: offset.height + verticalDelta
-                                ),
-                                zoom: zoom
-                            )
-                        }
-                    }
-                }
-                .frame(width: 1, height: 1)
-                .allowsHitTesting(false)
             }
             .overlay(alignment: .top) {
                 header(visibleRect: visibleRect, canvasWidth: geometry.size.width)
@@ -207,6 +194,7 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
     var onPan: (CGSize) -> Void
     var onPanEnd: () -> Void
     var onMagnify: (CGFloat) -> Void
+    var onScroll: (NSEvent) -> Void
     var onExport: () -> Void
 
     func makeNSView(context: Context) -> ClickView {
@@ -224,6 +212,7 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         nsView.onPan = onPan
         nsView.onPanEnd = onPanEnd
         nsView.onMagnify = onMagnify
+        nsView.onScroll = onScroll
         nsView.onExport = onExport
     }
 
@@ -236,6 +225,7 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         var onPan: ((CGSize) -> Void)?
         var onPanEnd: (() -> Void)?
         var onMagnify: ((CGFloat) -> Void)?
+        var onScroll: ((NSEvent) -> Void)?
         var onExport: (() -> Void)?
 
         private var dragOrigin: NSPoint?
@@ -243,11 +233,32 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         private var startedOnImage = false
         private var isPanning = false
         private var didPress = false
+        private var scrollMonitor: Any?
 
         override var isOpaque: Bool { false }
         override var isFlipped: Bool { true }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            removeScrollMonitor()
+            guard window != nil else { return }
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self,
+                      event.window === self.window,
+                      self.window === NSApp.keyWindow,
+                      self.window?.attachedSheet == nil,
+                      self.isInteractive else { return event }
+                guard event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 else { return event }
+                self.onScroll?(event)
+                return nil
+            }
+        }
+
+        deinit {
+            removeScrollMonitor()
+        }
 
         override func hitTest(_ point: NSPoint) -> NSView? {
             bounds.contains(point) ? self : nil
@@ -304,6 +315,11 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
             onMagnify?(event.magnification)
         }
 
+        override func scrollWheel(with event: NSEvent) {
+            guard isInteractive else { return }
+            onScroll?(event)
+        }
+
         override func menu(for event: NSEvent) -> NSMenu? {
             let point = convert(event.locationInWindow, from: nil)
             guard imageRect.contains(point) else { return nil }
@@ -319,60 +335,12 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         @objc private func exportImage() {
             onExport?()
         }
-    }
-}
 
-private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
-    let onScroll: (NSEvent) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onScroll: onScroll)
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        context.coordinator.start(in: view)
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.stop()
-    }
-
-    final class Coordinator {
-        let onScroll: (NSEvent) -> Void
-        var monitor: Any?
-
-        init(onScroll: @escaping (NSEvent) -> Void) {
-            self.onScroll = onScroll
-        }
-
-        func start(in view: NSView) {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self, weak view] event in
-                guard let self,
-                      let window = view?.window,
-                      event.window === window,
-                      window === NSApp.keyWindow,
-                      window.attachedSheet == nil else { return event }
-                guard event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 else { return event }
-                onScroll(event)
-                return nil
+        private func removeScrollMonitor() {
+            if let scrollMonitor {
+                NSEvent.removeMonitor(scrollMonitor)
             }
-        }
-
-        func stop() {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-            monitor = nil
-        }
-
-        deinit {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
+            scrollMonitor = nil
         }
     }
 }

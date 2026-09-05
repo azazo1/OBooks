@@ -37,6 +37,27 @@ final class ReaderImagePreviewTests: XCTestCase {
         XCTAssertEqual(large.toggledZoom(4), 1, accuracy: 0.001)
     }
 
+    func testScrollWheelPansAndCommandZooms() {
+        let pan = ReaderImagePreviewMetrics.scrollEffect(
+            deltaX: 12, deltaY: -30, command: false, shift: false
+        )
+        XCTAssertEqual(pan.zoomStep, 0)
+        XCTAssertEqual(pan.pan.width, 12)
+        XCTAssertEqual(pan.pan.height, -30)
+
+        let shifted = ReaderImagePreviewMetrics.scrollEffect(
+            deltaX: 0, deltaY: 20, command: false, shift: true
+        )
+        XCTAssertEqual(shifted.pan.width, 20)
+        XCTAssertEqual(shifted.pan.height, 0)
+
+        let zoom = ReaderImagePreviewMetrics.scrollEffect(
+            deltaX: 0, deltaY: 50, command: true, shift: false
+        )
+        XCTAssertEqual(zoom.zoomStep, 0.6, accuracy: 0.0001)
+        XCTAssertEqual(zoom.pan, .zero)
+    }
+
     func testBlankPointIsOutsideFittedImage() {
         let metrics = ReaderImagePreviewMetrics(
             imageSize: CGSize(width: 200, height: 100),

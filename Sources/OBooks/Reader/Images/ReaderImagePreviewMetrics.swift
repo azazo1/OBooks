@@ -70,4 +70,25 @@ struct ReaderImagePreviewMetrics: Equatable {
             height: min(verticalLimit, max(-verticalLimit, offset.height))
         )
     }
+
+    static func scrollEffect(
+        deltaX: CGFloat,
+        deltaY: CGFloat,
+        command: Bool,
+        shift: Bool
+    ) -> (zoomStep: CGFloat, pan: CGSize) {
+        if command {
+            let delta = deltaY != 0 ? deltaY : deltaX
+            return (max(-0.65, min(0.65, delta * 0.012)), .zero)
+        }
+        let horizontal: CGFloat
+        if abs(deltaX) > 0.01 {
+            horizontal = deltaX
+        } else if shift {
+            horizontal = deltaY
+        } else {
+            horizontal = 0
+        }
+        return (0, CGSize(width: horizontal, height: shift ? 0 : deltaY))
+    }
 }
