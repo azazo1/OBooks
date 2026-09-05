@@ -454,6 +454,14 @@ final class ReaderTextView: NSTextView {
         return (image, convert(viewRect, to: nil))
     }
     override func menu(for event: NSEvent) -> NSMenu? {
+        if let hit = imageHit(at: event) {
+            let menu = NSMenu(title: "图片")
+            menu.autoenablesItems = false
+            let item = menuItem(title: "导出图片...", symbol: "square.and.arrow.up", action: #selector(exportImage(_:)))
+            item.representedObject = hit.image
+            menu.addItem(item)
+            return menu
+        }
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)
         let clickedLocation = characterLocation(for: event)
         contextLocation = range.length > 0 ? range.location : clickedLocation
@@ -480,6 +488,11 @@ final class ReaderTextView: NSTextView {
             menu.addItem(menuItem(title: "拷贝", symbol: "doc.on.doc", action: #selector(copySelection)))
         }
         return menu
+    }
+
+    @objc private func exportImage(_ sender: NSMenuItem) {
+        guard let image = sender.representedObject as? NSImage else { return }
+        ReaderImageExporter.export(image, from: window)
     }
 
     @objc private func highlightSelection() {

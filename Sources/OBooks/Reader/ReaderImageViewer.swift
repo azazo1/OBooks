@@ -57,6 +57,13 @@ struct ReaderImageViewer: View {
                     .position(x: visibleRect.midX, y: visibleRect.midY)
                     .opacity(max(0.05, presentationProgress))
                     .contentShape(Rectangle())
+                    .contextMenu {
+                        Button {
+                            ReaderImageExporter.export(image)
+                        } label: {
+                            Label("导出图片...", systemImage: "square.and.arrow.up")
+                        }
+                    }
                     .onTapGesture(count: 2) {
                         guard presentationProgress > 0.99, !isClosing else { return }
                         withAnimation(.easeOut(duration: 0.18)) {
@@ -270,7 +277,7 @@ private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        context.coordinator.start()
+        context.coordinator.start(in: view)
         return view
     }
 
@@ -288,10 +295,13 @@ private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
             self.onScroll = onScroll
         }
 
-        func start() {
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        func start(in view: NSView) {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self, weak view] event in
                 guard let self,
-                      event.window === NSApp.keyWindow else { return event }
+                      let window = view?.window,
+                      event.window === window,
+                      window === NSApp.keyWindow,
+                      window.attachedSheet == nil else { return event }
                 guard event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 else { return event }
                 onScroll(event)
                 return nil

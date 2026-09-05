@@ -122,6 +122,57 @@ final class ReaderTextSelectionTests: XCTestCase {
         XCTAssertNil(fixture.textView.hitTest(fixture.textView.convert(offscreenPoint, to: fixture.textView.superview)))
     }
 
+    func testImageContextMenuUsesClickedImageAcrossReadingModes() throws {
+        let content = NSMutableAttributedString(string: "")
+        var images: [Int: NSImage] = [:]
+        for _ in 0..<18 {
+            content.append(NSAttributedString(string: "Caption\n", attributes: [.font: NSFont.systemFont(ofSize: 18)]))
+            let image = NSImage(size: NSSize(width: 160, height: 120))
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            attachment.bounds = NSRect(origin: .zero, size: image.size)
+            images[content.length] = image
+            content.append(NSAttributedString(attachment: attachment))
+            content.append(NSAttributedString(string: "\n"))
+        }
+        let exportAction = NSSelectorFromString("exportImage:")
+        for columns in [0, 1, 2] {
+            let fixture = Fixture(columns: max(1, columns), content: content)
+            defer { fixture.window.close() }
+            if columns == 0 {
+                fixture.scrollView.configure(flow: .scrolling(scope: .chapter))
+                fixture.textView.configurePageColumns(0, viewportHeight: 600)
+                fixture.textView.updateDocumentHeight(minimumHeight: 600)
+            }
+            let manager = try XCTUnwrap(fixture.textView.layoutManager)
+            let containerCount = columns == 0 ? 1 : columns * 2
+            XCTAssertGreaterThanOrEqual(manager.textContainers.count, containerCount)
+            let selection = NSRange(location: 0, length: 3)
+            fixture.textView.setSelectedRange(selection)
+            for index in 0..<containerCount {
+                let container = manager.textContainers[index]
+                let range = manager.characterRange(forGlyphRange: manager.glyphRange(for: container), actualGlyphRange: nil)
+                let location = try XCTUnwrap(images.keys.sorted().first { NSLocationInRange($0, range) })
+                let glyph = manager.glyphIndexForCharacter(at: location)
+                fixture.scrollView.scroll(to: CGFloat(index / max(1, columns)) * 600, animated: false)
+                let point = fixture.point(forGlyph: glyph, containerIndex: index)
+                let menu = try XCTUnwrap(fixture.textView.menu(for: fixture.event(.rightMouseDown, at: point)))
+                let item = try XCTUnwrap(menu.items.first { $0.action == exportAction })
+                XCTAssertTrue(item.target === fixture.textView)
+                XCTAssertTrue(item.representedObject as? NSImage === images[location])
+                XCTAssertEqual(fixture.textView.selectedRange(), selection)
+
+                let blankPoint = NSPoint(x: fixture.textView.bounds.width - 10, y: point.y)
+                let blankMenu = try XCTUnwrap(fixture.textView.menu(for: fixture.event(.rightMouseDown, at: blankPoint)))
+                XCTAssertFalse(blankMenu.items.contains { $0.action == exportAction })
+            }
+            fixture.scrollView.scroll(to: 0, animated: false)
+            let textPoint = fixture.point(forGlyph: 0, containerIndex: 0)
+            let textMenu = try XCTUnwrap(fixture.textView.menu(for: fixture.event(.rightMouseDown, at: textPoint)))
+            XCTAssertFalse(textMenu.items.contains { $0.action == exportAction })
+        }
+    }
+
     @MainActor
     private final class Fixture {
         let window: NSWindow
@@ -129,7 +180,7 @@ final class ReaderTextSelectionTests: XCTestCase {
         let textView: ReaderTextView
         let columns: Int
 
-        init(columns: Int, width: CGFloat = 900) {
+        init(columns: Int, width: CGFloat = 900, content: NSAttributedString? = nil) {
             _ = NSApplication.shared
             self.columns = columns
             let frame = NSRect(x: 0, y: 0, width: width, height: 600)
@@ -151,7 +202,7 @@ final class ReaderTextSelectionTests: XCTestCase {
             textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             scrollView.documentView = textView
             textView.setReadingInsets(horizontal: 56, vertical: 64)
-            textView.textStorage?.setAttributedString(NSAttributedString(
+            textView.textStorage?.setAttributedString(content ?? NSAttributedString(
                 string: String(repeating: "Text selection across page columns.\n", count: 180),
                 attributes: [.font: NSFont.monospacedSystemFont(ofSize: 18, weight: .regular)]
             ))
