@@ -181,6 +181,14 @@ struct ReaderView: View {
                     activePanel = .note
                     keepChromeVisible()
                 },
+                onAnnotationAtSection: { text, kind, annotationSectionIndex, range in
+                    addAnnotation(
+                        text: text,
+                        kind: kind,
+                        range: range,
+                        sectionIndex: annotationSectionIndex
+                    )
+                },
                 onRemoveAnnotation: { id in
                     removeAnnotation(id: id)
                 },
@@ -850,14 +858,15 @@ struct ReaderView: View {
         activePanel = activePanel?.anchor == panel ? nil : panel
     }
 
-    private func addAnnotation(text: String, kind: String, range: NSRange) {
+    private func addAnnotation(text: String, kind: String, range: NSRange, sectionIndex: Int? = nil) {
         guard !text.isEmpty, range.length > 0 else { return }
+        let annotationSectionIndex = sectionIndex ?? self.sectionIndex
         if kind == "highlight" {
             annotations = ReaderAnnotation.mergedHighlight(
-                text: text, sectionIndex: sectionIndex, range: range, into: annotations)
+                text: text, sectionIndex: annotationSectionIndex, range: range, into: annotations)
         } else {
             annotations.insert(
-                ReaderAnnotation(text: text, kind: kind, sectionIndex: sectionIndex, range: range), at: 0)
+                ReaderAnnotation(text: text, kind: kind, sectionIndex: annotationSectionIndex, range: range), at: 0)
         }
         persistAnnotations()
     }

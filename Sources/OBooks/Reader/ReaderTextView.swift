@@ -428,6 +428,7 @@ final class ReaderTextView: NSTextView {
     @objc private func highlightSelection() {
         guard let range = validSelectionRange(), range.length > 0 else { return }
         onHighlight?((string as NSString).substring(with: range), range)
+        setSelectedRange(NSRange(location: range.location + range.length, length: 0))
     }
 
     @objc private func addNote() {

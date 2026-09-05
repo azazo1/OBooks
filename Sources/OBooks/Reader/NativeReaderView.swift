@@ -22,6 +22,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onSpeakingChanged: (Bool) -> Void
     let onAnnotation: (String, String, NSRange) -> Void
     let onNoteRequest: (String, NSRange) -> Void
+    var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
@@ -88,6 +89,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
@@ -118,6 +120,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
@@ -172,6 +175,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
@@ -236,7 +240,7 @@ struct NativeReaderView: NSViewRepresentable {
                 }
             }
             textView.onHighlight = { [weak self] text, range in
-                self?.onAnnotation(text, "highlight", self?.localizedAnnotationRange(range) ?? range)
+                self?.handleHighlight(text: text, range: range)
             }
             textView.onNote = { [weak self] text, range in
                 self?.onNoteRequest(text, self?.localizedAnnotationRange(range) ?? range)
@@ -285,6 +289,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: @escaping (Bool) -> Void,
             onAnnotation: @escaping (String, String, NSRange) -> Void,
             onNoteRequest: @escaping (String, NSRange) -> Void,
+            onAnnotationAtSection: @escaping (String, String, Int, NSRange) -> Void = { _, _, _, _ in },
             onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
@@ -326,6 +331,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onSpeakingChanged = onSpeakingChanged
             self.onAnnotation = onAnnotation
             self.onNoteRequest = onNoteRequest
+            self.onAnnotationAtSection = onAnnotationAtSection
             self.onRemoveAnnotation = onRemoveAnnotation
             self.onNavigate = onNavigate
             self.onAnchorConsumed = onAnchorConsumed
@@ -525,6 +531,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
+            onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
@@ -842,18 +849,33 @@ struct NativeReaderView: NSViewRepresentable {
             renderedAnnotationRanges.removeAll()
 
             let appearance = NativeReaderAppearance(theme: settings.theme)
-            for annotation in annotations where annotation.sectionIndex == currentSectionIndex {
-                let globalRange: NSRange
+            for annotation in annotations where loadedBookContent || annotation.sectionIndex == currentSectionIndex {
+                var globalRange: NSRange
                 if loadedBookContent,
                    let book,
                    book.spine.indices.contains(annotation.sectionIndex) {
                     let identity = spineIdentity(book.spine[annotation.sectionIndex])
+                    guard let sectionRange = sectionRanges[identity] else { continue }
+                    let localRange = NSIntersectionRange(
+                        annotation.range,
+                        NSRange(location: 0, length: sectionRange.length)
+                    )
+                    guard localRange.length > 0 else { continue }
                     globalRange = NSRange(
-                        location: (sectionRanges[identity]?.location ?? 0) + annotation.range.location,
-                        length: annotation.range.length
+                        location: sectionRange.location + localRange.location,
+                        length: localRange.length
                     )
                 } else {
-                    globalRange = annotation.range
+                    let fullRange = NSRange(location: 0, length: textView.string.utf16.count)
+                    globalRange = NSIntersectionRange(annotation.range, fullRange)
+                }
+                if annotation.kind == "highlight" {
+                    let expected = textView.string as NSString
+                    let repaired = expected.range(of: annotation.text)
+                    if expected.substring(with: globalRange) != annotation.text,
+                       repaired.location != NSNotFound {
+                        globalRange = repaired
+                    }
                 }
                 let range = NSIntersectionRange(globalRange, fullRange)
                 guard range.length > 0 else { continue }
@@ -878,6 +900,37 @@ struct NativeReaderView: NSViewRepresentable {
                 NSLocationInRange(location, $0.range)
             }) else { return nil }
             return annotations.first { $0.id == rendered.id }
+        }
+
+        private func handleHighlight(text: String, range: NSRange) {
+            guard loadedBookContent,
+                  let textView,
+                  range.length > 0 else {
+                onAnnotation(text, "highlight", localizedAnnotationRange(range))
+                return
+            }
+            let fullRange = NSRange(location: 0, length: textView.string.utf16.count)
+            let selection = NSIntersectionRange(range, fullRange)
+            guard selection.length > 0 else { return }
+            let sections = sectionRanges.compactMap { identity, sectionRange -> (Int, NSRange)? in
+                guard let index = sectionIndices[identity] else { return nil }
+                return (index, sectionRange)
+            }.sorted { $0.1.location < $1.1.location }
+            var emitted = false
+            for (index, sectionRange) in sections {
+                let intersection = NSIntersectionRange(selection, sectionRange)
+                guard intersection.length > 0 else { continue }
+                let localRange = NSRange(
+                    location: intersection.location - sectionRange.location,
+                    length: intersection.length
+                )
+                let localText = (textView.string as NSString).substring(with: intersection)
+                onAnnotationAtSection(localText, "highlight", index, localRange)
+                emitted = true
+            }
+            if !emitted {
+                onAnnotation(text, "highlight", localizedAnnotationRange(selection))
+            }
         }
 
         private func notifyProgress(_ value: Double, position: ReadingPosition) {
