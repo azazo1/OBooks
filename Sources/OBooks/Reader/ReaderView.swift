@@ -67,29 +67,6 @@ private final class ReaderProgressState: ObservableObject {
     }
 }
 
-private struct ReaderInlineNotePopover: ViewModifier {
-    let isPresented: Binding<Bool>
-    let anchor: CGRect?
-    let editor: AnyView
-
-    func body(content: Content) -> some View {
-        content.overlay(alignment: .topLeading) {
-            if let anchor {
-                Color.clear
-                    .frame(width: 1, height: 1)
-                    .position(x: anchor.midX, y: anchor.midY)
-                    .popover(
-                        isPresented: isPresented,
-                        attachmentAnchor: .rect(.bounds),
-                        arrowEdge: .bottom
-                    ) {
-                        editor
-                    }
-            }
-        }
-    }
-}
-
 struct ReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
@@ -124,7 +101,6 @@ struct ReaderView: View {
     @State private var noteText = ""
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var editingAnnotationID: UUID?
-    @State private var inlineNotePopoverRect: CGRect?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -204,14 +180,12 @@ struct ReaderView: View {
                     noteRange = range
                     noteText = ""
                     editingAnnotationID = nil
-                    inlineNotePopoverRect = nil
                     activePanel = .note
                     keepChromeVisible()
                 },
-                onAnnotationClick: { annotation, rect in
+                onAnnotationClick: { annotation in
                     guard annotation.kind == "note" else { return }
-                    inlineNotePopoverRect = rect
-                    beginEditingNote(annotation, inPanel: false, navigate: false)
+                    beginEditingNote(annotation, inPanel: true, navigate: false)
                 },
                 onAnnotationAtSection: { text, kind, annotationSectionIndex, range in
                     addAnnotation(
@@ -238,12 +212,6 @@ struct ReaderView: View {
                     pendingPositionAnimated = false
                 }
             )
-            .modifier(ReaderInlineNotePopover(
-                isPresented: inlineNotePopoverPresented,
-                anchor: inlineNotePopoverRect,
-                editor: AnyView(noteEditor)
-            ))
-
             topBar
         }
         .overlay(alignment: .bottom) {
@@ -545,7 +513,7 @@ struct ReaderView: View {
                         .contextMenu {
                             if annotation.kind == "note" {
                                 Button("编辑笔记", systemImage: "pencil") {
-                                    beginEditingNote(annotation, inPanel: false)
+                                    beginEditingNote(annotation, inPanel: false, navigate: false)
                                 }
                             }
                             Button(
@@ -828,7 +796,6 @@ struct ReaderView: View {
                 Spacer()
                 Button {
                     editingAnnotationID = nil
-                    inlineNotePopoverRect = nil
                     if activePanel == .note { activePanel = nil }
                 } label: {
                     Image(systemName: "xmark")
@@ -860,6 +827,17 @@ struct ReaderView: View {
 
     private var chromeBackground: Color {
         colorScheme == .dark ? .black : Color(nsColor: .windowBackgroundColor)
+    }
+
+    private func editingBinding(for annotation: ReaderAnnotation) -> Binding<Bool> {
+        Binding(
+            get: { editingAnnotationID == annotation.id },
+            set: { isPresented in
+                if !isPresented, editingAnnotationID == annotation.id {
+                    editingAnnotationID = nil
+                }
+            }
+        )
     }
 
     private static func initialSectionIndex(for book: BookSummary) -> Int {
@@ -928,29 +906,6 @@ struct ReaderView: View {
         activePanel = activePanel?.anchor == panel ? nil : panel
     }
 
-    private func editingBinding(for annotation: ReaderAnnotation) -> Binding<Bool> {
-        Binding(
-            get: { editingAnnotationID == annotation.id },
-            set: { isPresented in
-                if !isPresented, editingAnnotationID == annotation.id {
-                    editingAnnotationID = nil
-                }
-            }
-        )
-    }
-
-    private var inlineNotePopoverPresented: Binding<Bool> {
-        Binding(
-            get: { editingAnnotationID != nil && inlineNotePopoverRect != nil },
-            set: { isPresented in
-                if !isPresented {
-                    editingAnnotationID = nil
-                    inlineNotePopoverRect = nil
-                }
-            }
-        )
-    }
-
     private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool, navigate: Bool = true) {
         guard annotation.kind == "note" else { return }
         noteContext = annotation.quote ?? ""
@@ -1009,7 +964,6 @@ struct ReaderView: View {
         }
         persistAnnotations()
         editingAnnotationID = nil
-        inlineNotePopoverRect = nil
         if activePanel == .note { activePanel = nil }
     }
 
