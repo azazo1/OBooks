@@ -217,11 +217,15 @@ final class ReaderTextView: NSTextView {
                 return
             }
         }
+        guard pageColumns > 1 else {
+            super.mouseDown(with: event)
+            return
+        }
         if event.clickCount == 1, let link = link(at: event) {
             onLink?(link)
             return
         }
-        guard pageColumns > 0,
+        guard pageColumns > 1,
               event.clickCount == 1,
               event.type == .leftMouseDown else {
             super.mouseDown(with: event)
@@ -235,7 +239,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard pageColumns > 0,
+        guard pageColumns > 1,
               isSelectingAcrossColumns,
               let anchor = selectionAnchorLocation else {
             super.mouseDragged(with: event)
@@ -250,7 +254,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard pageColumns > 0,
+        guard pageColumns > 1,
               isSelectingAcrossColumns else {
             super.mouseUp(with: event)
             return
