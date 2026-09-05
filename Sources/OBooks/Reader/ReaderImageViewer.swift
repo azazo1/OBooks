@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 struct ReaderImageViewer: View {
@@ -8,33 +9,16 @@ struct ReaderImageViewer: View {
 
     @State private var zoom: CGFloat = 1
     @State private var offset = CGSize.zero
-    @State private var magnificationStart: CGFloat?
-    @State private var dragStart: CGSize?
     @State private var presentationProgress: CGFloat = 0
     @State private var isClosing = false
     @State private var isTitleHovered = false
 
+    private let logger = Logger(subsystem: "com.obooks.app", category: "reader.image-preview")
+
     var body: some View {
         GeometryReader { geometry in
-            let contentSize = CGSize(
-                width: max(1, geometry.size.width - 44),
-                height: max(1, geometry.size.height - 104)
-            )
-            let fitScale = fitScale(for: contentSize)
-            let baseSize = CGSize(
-                width: max(1, image.size.width) * fitScale,
-                height: max(1, image.size.height) * fitScale
-            )
-            let displayedSize = CGSize(
-                width: baseSize.width * zoom,
-                height: baseSize.height * zoom
-            )
-            let targetRect = CGRect(
-                x: (geometry.size.width - displayedSize.width) / 2 + offset.width,
-                y: (geometry.size.height - displayedSize.height) / 2 + offset.height,
-                width: displayedSize.width,
-                height: displayedSize.height
-            )
+            let metrics = ReaderImagePreviewMetrics(imageSize: image.size, canvasSize: geometry.size)
+            let targetRect = metrics.imageRect(zoom: zoom, offset: offset)
             let localSourceRect = CGRect(
                 x: sourceRect.minX,
                 y: geometry.size.height - sourceRect.maxY,
@@ -42,138 +26,59 @@ struct ReaderImageViewer: View {
                 height: max(1, sourceRect.height)
             )
             let visibleRect = interpolatedRect(from: localSourceRect, to: targetRect, progress: presentationProgress)
+            let isInteractive = presentationProgress > 0.99 && !isClosing
 
             ZStack {
                 Color.black.opacity(0.94)
                     .ignoresSafeArea()
-                    .contentShape(Rectangle())
                     .opacity(0.94 * presentationProgress)
-                    .onTapGesture(perform: requestClose)
+                    .allowsHitTesting(false)
 
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
                     .frame(width: visibleRect.width, height: visibleRect.height)
-                    .position(x: visibleRect.midX, y: visibleRect.midY)
+                    .offset(
+                        x: visibleRect.midX - geometry.size.width / 2,
+                        y: visibleRect.midY - geometry.size.height / 2
+                    )
                     .opacity(max(0.05, presentationProgress))
-                    .contentShape(Rectangle())
-                    .contextMenu {
-                        Button {
-                            ReaderImageExporter.export(image)
-                        } label: {
-                            Label("导出图片...", systemImage: "square.and.arrow.up")
-                        }
-                        .labelStyle(.titleAndIcon)
-                    }
-                    .onTapGesture(count: 2) {
-                        guard presentationProgress > 0.99, !isClosing else { return }
-                        withAnimation(.easeOut(duration: 0.18)) {
-                            if zoom > 1.01 {
-                                zoom = 1
-                                offset = .zero
-                            } else {
-                                zoom = oneToOneZoom(fitScale: fitScale)
-                            }
-                        }
-                    }
-                    .gesture(
-                        DragGesture()
-                            .onChanged { value in
-                                guard presentationProgress > 0.99, zoom > 1.001, !isClosing else { return }
-                                if dragStart == nil {
-                                    dragStart = offset
-                                }
-                                offset = clampedOffset(
-                                    CGSize(
-                                        width: value.translation.width + (dragStart?.width ?? 0),
-                                        height: value.translation.height + (dragStart?.height ?? 0)
-                                    ),
-                                    displayedSize: displayedSize,
-                                    contentSize: contentSize
-                                )
-                            }
-                            .onEnded { _ in
-                                withAnimation(.easeOut(duration: 0.16)) {
-                                    offset = clampedOffset(
-                                        offset,
-                                        displayedSize: displayedSize,
-                                        contentSize: contentSize
-                                    )
-                                }
-                                dragStart = nil
-                            }
-                    )
-                    .simultaneousGesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                guard presentationProgress > 0.99, !isClosing else { return }
-                                if magnificationStart == nil {
-                                    magnificationStart = zoom
-                                }
-                                let start = magnificationStart ?? zoom
-                                zoom = clampedZoom(start * value, fitScale: fitScale)
-                                offset = clampedOffset(
-                                    offset,
-                                    displayedSize: CGSize(
-                                        width: baseSize.width * zoom,
-                                        height: baseSize.height * zoom
-                                    ),
-                                    contentSize: contentSize
-                                )
-                            }
-                            .onEnded { _ in
-                                magnificationStart = nil
-                            }
-                    )
+                    .allowsHitTesting(false)
 
-                VStack(spacing: 0) {
-                    ZStack {
-                        let titleCovered = visibleRect.minY < 52 && visibleRect.maxY > 0 && visibleRect.minX < geometry.size.width * 0.72 && visibleRect.maxX > geometry.size.width * 0.28
-                        Text("图片预览")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.86))
-                            .padding(.horizontal, 12)
-                            .frame(height: 30)
-                            .background {
-                                if !titleCovered || isTitleHovered {
-                                    Capsule().fill(.black.opacity(0.28))
-                                }
-                            }
-                            .onHover { isTitleHovered = $0 }
-                        HStack(spacing: 10) {
-                            Spacer()
-                            Text("\(Int(zoom * 100))%")
-                                .font(.system(size: 11).monospacedDigit())
-                                .foregroundStyle(.white.opacity(0.55))
-                            Button(action: requestClose) {
-                                Group() {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.82))
-                                        .frame(width: 28, height: 28)
-                                }
-                                .contentShape(Rectangle())
-                                .overlay {
-                                    Circle()
-                                        .fill(Color.white.opacity(0.12))
-                                        .frame(width: 28, height: 28)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .help("关闭图片预览")
+                ReaderImagePreviewClickCatcher(
+                    imageRect: visibleRect,
+                    isInteractive: isInteractive,
+                    allowsPan: zoom > 1.001,
+                    onClose: requestClose,
+                    onToggleZoom: {
+                        let next = metrics.toggledZoom(zoom)
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            zoom = next
+                            if next <= 1.01 { offset = .zero }
                         }
-                        .padding(.horizontal, 18)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    Spacer()
-                }
-                .opacity(presentationProgress)
-                .allowsHitTesting(true)
+                        logger.info("图片预览双击缩放: \(next, format: .fixed(precision: 2))")
+                    },
+                    onPan: { delta in
+                        offset = metrics.clampedOffset(
+                            CGSize(width: offset.width + delta.width, height: offset.height + delta.height),
+                            zoom: zoom
+                        )
+                    },
+                    onPanEnd: {
+                        withAnimation(.easeOut(duration: 0.16)) {
+                            offset = metrics.clampedOffset(offset, zoom: zoom)
+                        }
+                    },
+                    onMagnify: { magnification in
+                        zoom = metrics.clampedZoom(zoom * (1 + magnification))
+                        offset = metrics.clampedOffset(offset, zoom: zoom)
+                    },
+                    onExport: { ReaderImageExporter.export(image) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 ReaderImageViewerEventMonitor { event in
-                    guard presentationProgress > 0.99, !isClosing else { return }
+                    guard isInteractive else { return }
                     let x = event.scrollingDeltaX
                     let y = event.scrollingDeltaY
                     let isZooming = event.modifierFlags.contains(.command)
@@ -183,7 +88,7 @@ struct ReaderImageViewer: View {
                         if isZooming {
                             let delta = y != 0 ? y : x
                             let step = max(-0.65, min(0.65, delta * 0.012))
-                            zoom = clampedZoom(zoom + step, fitScale: fitScale)
+                            zoom = metrics.clampedZoom(zoom + step)
                         } else {
                             let horizontalDelta: CGFloat
                             if abs(x) > 0.01 {
@@ -193,29 +98,31 @@ struct ReaderImageViewer: View {
                             } else {
                                 horizontalDelta = 0
                             }
-
                             let verticalDelta = isShifted ? 0 : y
-
-                            offset = clampedOffset(
+                            offset = metrics.clampedOffset(
                                 CGSize(
                                     width: offset.width + horizontalDelta,
                                     height: offset.height + verticalDelta
                                 ),
-                                displayedSize: CGSize(
-                                    width: baseSize.width * zoom,
-                                    height: baseSize.height * zoom
-                                ),
-                                contentSize: contentSize
+                                zoom: zoom
                             )
                         }
                     }
                 }
                 .frame(width: 1, height: 1)
+                .allowsHitTesting(false)
+            }
+            .overlay(alignment: .top) {
+                header(visibleRect: visibleRect, canvasWidth: geometry.size.width)
+                    .opacity(presentationProgress)
             }
             .onAppear {
                 zoom = 1
                 offset = .zero
                 presentationProgress = 0
+                logger.info(
+                    "打开图片预览: native=\(image.size.width, format: .fixed(precision: 0))x\(image.size.height, format: .fixed(precision: 0)), fit=\(metrics.fitScale, format: .fixed(precision: 2))"
+                )
                 withAnimation(.easeInOut(duration: 0.34)) {
                     presentationProgress = 1
                 }
@@ -224,27 +131,48 @@ struct ReaderImageViewer: View {
         .onExitCommand(perform: requestClose)
     }
 
-    private func fitScale(for contentSize: CGSize) -> CGFloat {
-        let width = max(image.size.width, 1)
-        let height = max(image.size.height, 1)
-        return min(1, min(contentSize.width / width, contentSize.height / height))
-    }
-
-    private func oneToOneZoom(fitScale: CGFloat) -> CGFloat {
-        max(1, 1 / max(fitScale, 0.001))
-    }
-
-    private func clampedZoom(_ value: CGFloat, fitScale: CGFloat) -> CGFloat {
-        max(1, min(max(8, oneToOneZoom(fitScale: fitScale)), value))
-    }
-
-    private func clampedOffset(_ value: CGSize, displayedSize: CGSize, contentSize: CGSize) -> CGSize {
-        let horizontalLimit = max(0, (displayedSize.width - contentSize.width) / 2)
-        let verticalLimit = max(0, (displayedSize.height - contentSize.height) / 2)
-        return CGSize(
-            width: min(horizontalLimit, max(-horizontalLimit, value.width)),
-            height: min(verticalLimit, max(-verticalLimit, value.height))
-        )
+    private func header(visibleRect: CGRect, canvasWidth: CGFloat) -> some View {
+        ZStack {
+            let titleCovered = visibleRect.minY < 52 && visibleRect.maxY > 0
+                && visibleRect.minX < canvasWidth * 0.72 && visibleRect.maxX > canvasWidth * 0.28
+            Text("图片预览")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.86))
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background {
+                    if !titleCovered || isTitleHovered {
+                        Capsule().fill(.black.opacity(0.28))
+                    }
+                }
+                .onHover { isTitleHovered = $0 }
+            HStack(spacing: 10) {
+                Spacer()
+                Text("\(Int((zoom * 100).rounded()))%")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.55))
+                Button(action: requestClose) {
+                    Group() {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.82))
+                            .frame(width: 28, height: 28)
+                    }
+                    .contentShape(Rectangle())
+                    .overlay {
+                        Circle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 28, height: 28)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("关闭图片预览")
+            }
+            .padding(.horizontal, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
     }
 
     private func interpolatedRect(from: CGRect, to: CGRect, progress: CGFloat) -> CGRect {
@@ -260,11 +188,130 @@ struct ReaderImageViewer: View {
     private func requestClose() {
         guard !isClosing else { return }
         isClosing = true
+        logger.info("关闭图片预览")
         withAnimation(.easeInOut(duration: 0.3)) {
             presentationProgress = 0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
             onClose()
+        }
+    }
+}
+
+private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
+    var imageRect: CGRect
+    var isInteractive: Bool
+    var allowsPan: Bool
+    var onClose: () -> Void
+    var onToggleZoom: () -> Void
+    var onPan: (CGSize) -> Void
+    var onPanEnd: () -> Void
+    var onMagnify: (CGFloat) -> Void
+    var onExport: () -> Void
+
+    func makeNSView(context: Context) -> ClickView {
+        let view = ClickView()
+        updateNSView(view, context: context)
+        return view
+    }
+
+    func updateNSView(_ nsView: ClickView, context: Context) {
+        nsView.imageRect = imageRect
+        nsView.isInteractive = isInteractive
+        nsView.allowsPan = allowsPan
+        nsView.onClose = onClose
+        nsView.onToggleZoom = onToggleZoom
+        nsView.onPan = onPan
+        nsView.onPanEnd = onPanEnd
+        nsView.onMagnify = onMagnify
+        nsView.onExport = onExport
+    }
+
+    final class ClickView: NSView {
+        var imageRect: CGRect = .zero
+        var isInteractive = false
+        var allowsPan = false
+        var onClose: (() -> Void)?
+        var onToggleZoom: (() -> Void)?
+        var onPan: ((CGSize) -> Void)?
+        var onPanEnd: (() -> Void)?
+        var onMagnify: ((CGFloat) -> Void)?
+        var onExport: (() -> Void)?
+
+        private var dragOrigin: NSPoint?
+        private var lastDragPoint: NSPoint?
+        private var startedOnImage = false
+        private var isPanning = false
+
+        override var isOpaque: Bool { false }
+        override var isFlipped: Bool { true }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            bounds.contains(point) ? self : nil
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard isInteractive else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            dragOrigin = point
+            lastDragPoint = point
+            startedOnImage = imageRect.contains(point)
+            isPanning = false
+            if event.clickCount == 2, startedOnImage {
+                onToggleZoom?()
+            }
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard isInteractive, startedOnImage, allowsPan, let origin = dragOrigin else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            if !isPanning {
+                guard hypot(point.x - origin.x, point.y - origin.y) >= 4 else { return }
+                isPanning = true
+            }
+            if let last = lastDragPoint {
+                onPan?(CGSize(width: point.x - last.x, height: point.y - last.y))
+            }
+            lastDragPoint = point
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard isInteractive else { return }
+            let point = convert(event.locationInWindow, from: nil)
+            let panning = isPanning
+            dragOrigin = nil
+            lastDragPoint = nil
+            isPanning = false
+            if panning {
+                onPanEnd?()
+                return
+            }
+            if event.clickCount == 1, !startedOnImage, !imageRect.contains(point) {
+                onClose?()
+            }
+        }
+
+        override func magnify(with event: NSEvent) {
+            guard isInteractive else { return }
+            onMagnify?(event.magnification)
+        }
+
+        override func menu(for event: NSEvent) -> NSMenu? {
+            let point = convert(event.locationInWindow, from: nil)
+            guard imageRect.contains(point) else { return nil }
+            let menu = NSMenu(title: "图片")
+            menu.autoenablesItems = false
+            let item = NSMenuItem(title: "导出图片...", action: #selector(exportImage), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = true
+            menu.addItem(item)
+            return menu
+        }
+
+        @objc private func exportImage() {
+            onExport?()
         }
     }
 }
