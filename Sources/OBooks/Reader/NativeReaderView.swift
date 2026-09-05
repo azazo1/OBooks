@@ -750,7 +750,7 @@ struct NativeReaderView: NSViewRepresentable {
             clearSpeechRange()
         }
 
-        private func showSpeechRange(_ range: NSRange) {
+        func showSpeechRange(_ range: NSRange) {
             guard let textView, let layoutManager = textView.layoutManager else { return }
             clearSpeechRange()
             let validRange = NSIntersectionRange(range, NSRange(location: 0, length: textView.string.utf16.count))
@@ -761,14 +761,17 @@ struct NativeReaderView: NSViewRepresentable {
                 forCharacterRange: validRange
             )
             speechRange = validRange
+            // 分页的额外文本容器没有关联视图, 临时属性变化需要显式触发重绘.
+            textView.needsDisplay = true
             textView.scrollRangeToVisible(validRange)
         }
 
         private func clearSpeechRange() {
-            guard let range = speechRange, let layoutManager = textView?.layoutManager else { return }
+            guard let range = speechRange, let textView, let layoutManager = textView.layoutManager else { return }
             layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
             speechRange = nil
             applyAnnotations()
+            textView.needsDisplay = true
         }
 
         private func applyAnnotations() {
