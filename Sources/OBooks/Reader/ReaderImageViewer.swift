@@ -165,29 +165,37 @@ struct ReaderImageViewer: View {
 
                 ReaderImageViewerEventMonitor { event in
                     guard presentationProgress > 0.99, !isClosing else { return }
+                    let x = event.scrollingDeltaX
+                    let y = event.scrollingDeltaY
                     let isZooming = event.modifierFlags.contains(.command)
-                    let isHorizontal = event.modifierFlags.contains(.shift)
+                    let isShifted = event.modifierFlags.contains(.shift)
+
                     withAnimation(.easeOut(duration: 0.1)) {
                         if isZooming {
-                            let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
+                            let delta = y != 0 ? y : x
                             let step = max(-0.65, min(0.65, delta * 0.012))
                             zoom = clampedZoom(zoom + step, fitScale: fitScale)
-                            offset = clampedOffset(
-                                offset,
-                                displayedSize: CGSize(width: baseSize.width * zoom, height: baseSize.height * zoom),
-                                contentSize: contentSize
-                            )
-                        } else if isHorizontal {
-                            let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
-                            offset = clampedOffset(
-                                CGSize(width: offset.width + delta, height: offset.height),
-                                displayedSize: displayedSize,
-                                contentSize: contentSize
-                            )
                         } else {
+                            let horizontalDelta: CGFloat
+                            if abs(x) > 0.01 {
+                                horizontalDelta = x
+                            } else if isShifted {
+                                horizontalDelta = y
+                            } else {
+                                horizontalDelta = 0
+                            }
+
+                            let verticalDelta = isShifted ? 0 : y
+
                             offset = clampedOffset(
-                                CGSize(width: offset.width, height: offset.height + event.scrollingDeltaY),
-                                displayedSize: CGSize(width: baseSize.width * zoom, height: baseSize.height * zoom),
+                                CGSize(
+                                    width: offset.width + horizontalDelta,
+                                    height: offset.height + verticalDelta
+                                ),
+                                displayedSize: CGSize(
+                                    width: baseSize.width * zoom,
+                                    height: baseSize.height * zoom
+                                ),
                                 contentSize: contentSize
                             )
                         }
