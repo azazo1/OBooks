@@ -107,6 +107,7 @@ struct ReaderView: View {
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var editingAnnotationID: UUID?
     @State private var noteEditorSource: NoteEditorSource?
+    @State private var activeImage: NSImage?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -205,6 +206,11 @@ struct ReaderView: View {
                 onRemoveAnnotation: { id in
                     removeAnnotation(id: id)
                 },
+                onImageClick: { image in
+                    activeImage = image
+                    hideChromeTask?.cancel()
+                    chromeVisible = true
+                },
                 onNavigate: { index, anchor in
                     registerJump()
                     navigateTo(sectionIndex: index, anchor: anchor)
@@ -245,6 +251,14 @@ struct ReaderView: View {
             }
             .allowsHitTesting(false)
         }
+        .overlay {
+            if let activeImage {
+                ReaderImageViewer(image: activeImage) {
+                    self.activeImage = nil
+                    scheduleChromeHide(after: .milliseconds(650))
+                }
+            }
+        }
         .frame(minWidth: 980, minHeight: 680)
         .ignoresSafeArea(.container, edges: .top)
         .background(chromeBackground)
@@ -283,9 +297,11 @@ struct ReaderView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             activePanel = nil
+            activeImage = nil
         }
         .onDisappear {
             activePanel = nil
+            activeImage = nil
             hideChromeTask?.cancel()
             progressState.flush()
         }

@@ -3,6 +3,49 @@ import XCTest
 @testable import OBooks
 
 final class NativeChapterLoaderTests: XCTestCase {
+    func testRendersImageAndImageAttachments() throws {
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let chapterURL = rootURL.appendingPathComponent("chapter.xhtml")
+        let imageURL = rootURL.appendingPathComponent("figure.tiff")
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 320,
+            pixelsHigh: 180,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bitmapFormat: [],
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        let image = NSImage(size: NSSize(width: 320, height: 180))
+        image.addRepresentation(bitmap)
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: imageURL)
+        let data = Data("""
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body><p><img src="figure.tiff" /><image href="figure.tiff" /></p></body>
+        </html>
+        """.utf8)
+
+        let document = try NativeChapterLoader().loadDocument(
+            data: data,
+            chapterURL: chapterURL,
+            rootURL: rootURL,
+            fontSize: 18,
+            lineHeight: 1.7,
+            foreground: .textColor
+        )
+
+        let attachments = (0..<document.attributedText.length).compactMap { index in
+            document.attributedText.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment
+        }
+        XCTAssertEqual(attachments.count, 2)
+        XCTAssertTrue(attachments.allSatisfy { $0.image?.size == image.size })
+    }
+
     func testPreservesMixedContentOrderAndTextStyles() throws {
         let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let chapterURL = rootURL.appendingPathComponent("chapter.xhtml")

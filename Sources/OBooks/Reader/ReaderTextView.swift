@@ -9,6 +9,7 @@ final class ReaderTextView: NSTextView {
     var onRemoveAnnotation: ((UUID) -> Void)?
     var onSpeak: ((Int) -> Void)?
     var onLink: ((URL) -> Void)?
+    var onImageClick: ((NSImage) -> Void)?
     var preferredReadingWidth: CGFloat = 820
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
@@ -230,6 +231,10 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let image = image(at: event) {
+            onImageClick?(image)
+            return
+        }
         if pageColumns > 0, event.clickCount == 1,
            let scrollView = enclosingScrollView as? ReaderScrollView {
             let point = convert(event.locationInWindow, from: nil)
@@ -389,8 +394,12 @@ final class ReaderTextView: NSTextView {
         guard glyphRect.contains(containerPoint) else { return }
         let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
         guard characterIndex < textStorage.length,
-              textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil
-        else { return }
+              textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) == nil else {
+            if image(at: event) != nil {
+                NSCursor.pointingHand.set()
+            }
+            return
+        }
         let character = (textStorage.string as NSString).substring(
             with: NSRange(location: characterIndex, length: 1)
         )
@@ -410,6 +419,29 @@ final class ReaderTextView: NSTextView {
               characterIndex < textStorage.length,
               let link = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) as? URL else { return nil }
         return link
+    }
+
+    private func image(at event: NSEvent) -> NSImage? {
+        guard let layoutManager, let textStorage else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let (textContainer, origin) = textContainerContext(at: point) else { return nil }
+        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        let containerGlyphRange = layoutManager.glyphRange(for: textContainer)
+        guard containerGlyphRange.length > 0,
+              glyphIndex >= containerGlyphRange.location,
+              glyphIndex < NSMaxRange(containerGlyphRange) else { return nil }
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.contains(containerPoint) else { return nil }
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard characterIndex < textStorage.length,
+              let attachment = textStorage.attribute(.attachment, at: characterIndex, effectiveRange: nil) as? NSTextAttachment else {
+            return nil
+        }
+        return attachment.image
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)

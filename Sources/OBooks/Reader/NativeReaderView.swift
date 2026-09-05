@@ -25,6 +25,7 @@ struct NativeReaderView: NSViewRepresentable {
     var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
     var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
+    var onImageClick: (NSImage) -> Void = { _ in }
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
@@ -93,6 +94,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick: onAnnotationClick,
             onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
+            onImageClick: onImageClick,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed
@@ -125,6 +127,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick: onAnnotationClick,
             onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
+            onImageClick: onImageClick,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed
@@ -181,6 +184,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
         private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
+        private var onImageClick: (NSImage) -> Void = { _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
@@ -265,6 +269,9 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onLink = { [weak self] url in
                 self?.openLink(url)
             }
+            textView.onImageClick = { [weak self] image in
+                self?.onImageClick(image)
+            }
 
             scrollView.contentView.postsBoundsChangedNotifications = true
             scrollObserver = NotificationCenter.default.addObserver(
@@ -300,6 +307,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick: @escaping (ReaderAnnotation) -> Void = { _ in },
             onAnnotationAtSection: @escaping (String, String, Int, NSRange) -> Void = { _, _, _, _ in },
             onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
+            onImageClick: @escaping (NSImage) -> Void = { _ in },
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
             onPositionConsumed: @escaping () -> Void
@@ -343,6 +351,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onAnnotationClick = onAnnotationClick
             self.onAnnotationAtSection = onAnnotationAtSection
             self.onRemoveAnnotation = onRemoveAnnotation
+            self.onImageClick = onImageClick
             self.onNavigate = onNavigate
             self.onAnchorConsumed = onAnchorConsumed
             self.onPositionConsumed = onPositionConsumed
@@ -567,6 +576,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationClick = { _ in }
             onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
+            onImageClick = { _ in }
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
             onPositionConsumed = {}
@@ -593,6 +603,7 @@ struct NativeReaderView: NSViewRepresentable {
             textView?.onRemoveAnnotation = nil
             textView?.onSpeak = nil
             textView?.onLink = nil
+            textView?.onImageClick = nil
         }
 
         private func schedulePositionRestoration() {
