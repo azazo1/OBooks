@@ -73,6 +73,7 @@ struct LibraryView: View {
                 LibraryHomeView(
                     books: visibleBooks,
                     store: appModel.libraryStore,
+                    stats: appModel.readingStats,
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
                     onDelete: requestDelete,

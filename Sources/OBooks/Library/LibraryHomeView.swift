@@ -4,6 +4,7 @@ import SwiftUI
 struct LibraryHomeView: View {
     let books: [BookSummary]
     let store: LibraryStore
+    @ObservedObject var stats: ReadingStatsLedger
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
     let onDelete: (BookSummary) -> Void
@@ -92,7 +93,11 @@ struct LibraryHomeView: View {
                 }
 
                 shelfSection(title: "阅读目标") {
-                    ReadingGoalCard(books: books)
+                    ReadingGoalCard(books: books, stats: stats)
+                }
+
+                shelfSection(title: "阅读统计") {
+                    ReadingStatsSection(stats: stats)
                 }
             }
             .padding(.horizontal, 40)
@@ -110,12 +115,10 @@ struct LibraryHomeView: View {
                     .font(.system(size: 29, weight: .bold))
                     .foregroundStyle(.white.opacity(0.94))
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: todayCheckedIn ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(OBooksPalette.accent)
-                    Text("今日阅读进度")
+                    Text(todayHeaderLabel)
                         .foregroundStyle(OBooksPalette.accent)
-                    Text("目标已达成")
-                        .foregroundStyle(OBooksPalette.secondaryText)
                 }
                 .font(.system(size: 12, weight: .medium))
             }
@@ -130,6 +133,20 @@ struct LibraryHomeView: View {
             )
             .help("导入 EPUB")
         }
+    }
+
+    private var todaySeconds: TimeInterval {
+        stats.totalSeconds(on: ReadingDay(date: Date(), calendar: .current))
+    }
+
+    private var todayCheckedIn: Bool {
+        ReadingCheckIn.qualifies(todaySeconds)
+    }
+
+    private var todayHeaderLabel: String {
+        todaySeconds > 0
+            ? "今日阅读 " + ReadingDurationFormat.label(todaySeconds)
+            : "今天还没有开始阅读"
     }
 
     private var dailyReadingLine: some View {

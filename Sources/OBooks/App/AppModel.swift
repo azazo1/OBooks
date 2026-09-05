@@ -19,7 +19,10 @@ final class AppModel: ObservableObject {
     @Published var alert: AppAlert?
 
     let libraryStore: LibraryStore
+    let readingStats: ReadingStatsLedger
     let speechPlaybackOwner = SpeechPlaybackOwner()
+    private let readingStatsStore: ReadingStatsStore
+    private let readingStatsTracker: ReadingStatsTracker
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
     private var readerWindows: [UUID: NSWindow] = [:]
     private var readerDelegates: [UUID: ReaderWindowDelegate] = [:]
@@ -27,8 +30,15 @@ final class AppModel: ObservableObject {
 
     init() {
         let store = LibraryStore()
+        let statsStore = ReadingStatsStore(rootURL: store.rootURL)
+        let ledger = ReadingStatsLedger(buckets: statsStore.load())
         libraryStore = store
+        readingStatsStore = statsStore
+        readingStats = ledger
         books = store.load()
+        readingStatsTracker = ReadingStatsTracker(ledger: ledger) {
+            statsStore.save(ledger.buckets)
+        }
     }
 
     func importEPUB() {
@@ -79,6 +89,8 @@ final class AppModel: ObservableObject {
 
         progressSaveTask?.cancel()
         closeReader(for: book.id)
+        readingStats.removeBook(book.id)
+        readingStatsStore.save(readingStats.buckets)
         books.removeAll { $0.id == book.id }
         if selectedBookID == book.id {
             selectedBookID = nil
@@ -136,15 +148,21 @@ final class AppModel: ObservableObject {
         window.setContentSize(initialSize)
         AppWindowConfiguration.applyPrimaryStageBehavior(window)
         AppWindowConfiguration.centerOnScreen(window)
-        let delegate = ReaderWindowDelegate { [weak self] closingWindow in
-            guard let self, self.readerWindows[book.id] === closingWindow else { return }
-            let retainedWindow = self.readerWindows[book.id]
-            let retainedDelegate = self.readerDelegates[book.id]
-            closingWindow.delegate = nil
-            self.readerWindows.removeValue(forKey: book.id)
-            self.readerDelegates.removeValue(forKey: book.id)
-            withExtendedLifetime((retainedWindow, retainedDelegate)) {}
-        }
+        let delegate = ReaderWindowDelegate(
+            onClose: { [weak self] closingWindow in
+                guard let self, self.readerWindows[book.id] === closingWindow else { return }
+                let retainedWindow = self.readerWindows[book.id]
+                let retainedDelegate = self.readerDelegates[book.id]
+                closingWindow.delegate = nil
+                self.readerWindows.removeValue(forKey: book.id)
+                self.readerDelegates.removeValue(forKey: book.id)
+                self.readingStatsTracker.stop(bookID: book.id)
+                withExtendedLifetime((retainedWindow, retainedDelegate)) {}
+            },
+            onReadingActiveChange: { [weak self] isActive in
+                self?.readingStatsTracker.setActive(bookID: book.id, isActive: isActive)
+            }
+        )
         window.delegate = delegate
         readerDelegates[book.id] = delegate
         readerWindows[book.id] = window
@@ -154,6 +172,7 @@ final class AppModel: ObservableObject {
     }
 
     private func closeReader(for bookID: UUID) {
+        readingStatsTracker.stop(bookID: bookID)
         if let window = readerWindows[bookID] {
             window.delegate = nil
             window.close()
@@ -179,6 +198,7 @@ final class AppModel: ObservableObject {
             books[index].readingPosition = position
         }
         books[index].lastOpenedAt = Date()
+        readingStatsTracker.noteInteraction()
         scheduleProgressSave()
     }
 
