@@ -67,38 +67,12 @@ private final class ReaderProgressState: ObservableObject {
     }
 }
 
-private enum ReaderPanel: Equatable {
-    case toc
-    case bookmarks
-    case highlights
-    case search
-    case settings
-    case flow
-
-    var title: String {
-        switch self {
-        case .toc: return "目录"
-        case .bookmarks: return "书签"
-        case .highlights: return "高亮标记和笔记"
-        case .search: return "搜索"
-        case .settings: return "主题与设置"
-        case .flow: return "浏览模式"
-        }
-    }
-
-    var isLeading: Bool {
-        switch self {
-        case .toc, .bookmarks: return true
-        case .highlights, .search, .settings, .flow: return false
-        }
-    }
-}
-
 struct ReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var appModel: AppModel
 
     let book: BookSummary
+    private let tocIndex: ReaderTOCIndex
     @State private var controller = ReaderController()
     @State private var sectionIndex = 0
     @State private var pendingAnchor: String?
@@ -115,6 +89,7 @@ struct ReaderView: View {
     @State private var pageNumber = 1
     @State private var pageCount = 1
     @State private var activePanel: ReaderPanel?
+    @State private var currentTOCEntryID: UUID?
     @State private var isBookmarked = false
     @State private var searchQuery = ""
     @State private var isSpeaking = false
@@ -125,10 +100,12 @@ struct ReaderView: View {
     @State private var noteContext = ""
     @State private var noteText = ""
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
-    @State private var isEditingNote = false
+    @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
         self.book = book
+        let tocIndex = ReaderTOCIndex(spine: book.spine, items: book.toc)
+        self.tocIndex = tocIndex
         let initialSectionIndex = Self.initialSectionIndex(for: book)
         _sectionIndex = State(initialValue: initialSectionIndex)
         _flow = State(
@@ -141,6 +118,11 @@ struct ReaderView: View {
             initialValue: Self.initialReadingPosition(for: book)
                 ?? Self.defaultReadingPosition(for: book, sectionIndex: initialSectionIndex)
         )
+        if let position = Self.initialReadingPosition(for: book)
+            ?? Self.defaultReadingPosition(for: book, sectionIndex: initialSectionIndex)
+        {
+            _currentTOCEntryID = State(initialValue: tocIndex.entryID(at: position, anchors: [:]))
+        }
     }
 
     var body: some View {
@@ -175,6 +157,9 @@ struct ReaderView: View {
                     let displayValue = flow.scrollScope == .chapter && !flow.isPaging ? value : overall
                     progressState.update(displayValue, persistValue: overall, position: position)
                 },
+                onTOCSelection: { id in
+                    if currentTOCEntryID != id { currentTOCEntryID = id }
+                },
                 onPageInfo: { number, count in
                     pageNumber = number
                     pageCount = count
@@ -195,7 +180,7 @@ struct ReaderView: View {
                     noteContext = text
                     noteRange = range
                     noteText = ""
-                    isEditingNote = true
+                    activePanel = .note
                     keepChromeVisible()
                 },
                 onNavigate: { index, anchor in
@@ -214,10 +199,6 @@ struct ReaderView: View {
             )
 
             topBar
-
-            if let activePanel {
-                panelView(activePanel)
-            }
         }
         .overlay(alignment: .bottom) {
             readerFooter
@@ -243,13 +224,6 @@ struct ReaderView: View {
             }
             .allowsHitTesting(false)
         }
-        .overlay(alignment: .bottomTrailing) {
-            if isEditingNote {
-                noteEditor
-                    .padding(.trailing, 24)
-                    .padding(.bottom, 58)
-            }
-        }
         .frame(minWidth: 980, minHeight: 680)
         .ignoresSafeArea(.container, edges: .top)
         .background(chromeBackground)
@@ -266,12 +240,28 @@ struct ReaderView: View {
         .onChange(of: flow) { _, newFlow in
             UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
         }
+        .onChange(of: activePanel) { _, panel in
+            if panel == nil {
+                focusedField = nil
+                scheduleChromeHide(after: .milliseconds(650))
+            } else {
+                keepChromeVisible()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+            activePanel = nil
+        }
         .onDisappear {
+            activePanel = nil
             hideChromeTask?.cancel()
             progressState.flush()
         }
         .onExitCommand {
-            NSApp.keyWindow?.performClose(nil)
+            if activePanel != nil {
+                activePanel = nil
+            } else {
+                NSApp.keyWindow?.performClose(nil)
+            }
         }
     }
 
@@ -330,11 +320,14 @@ struct ReaderView: View {
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
+                .foregroundStyle(activePanel?.anchor == panel ? OBooksPalette.accent : toolbarForeground)
                 .frame(width: 22, height: 26)
         }
         .buttonStyle(OBooksIconButtonStyle())
         .help(help)
+        .popover(item: panelBinding(for: panel), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            panelContent($0)
+        }
     }
 
     private func readerButton(label: String, help: String, panel: ReaderPanel) -> some View {
@@ -343,78 +336,55 @@ struct ReaderView: View {
         } label: {
             Text(label)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(activePanel == panel ? OBooksPalette.accent : .white.opacity(0.78))
+                .foregroundStyle(activePanel?.anchor == panel ? OBooksPalette.accent : toolbarForeground)
                 .frame(width: 22, height: 26)
         }
         .buttonStyle(OBooksIconButtonStyle())
         .help(help)
-    }
-
-    @ViewBuilder
-    private func panelView(_ panel: ReaderPanel) -> some View {
-        panelContent(panel)
-            .padding(.top, 52)
-            .frame(
-                maxWidth: .infinity, maxHeight: .infinity,
-                alignment: panel.isLeading ? .topLeading : .topTrailing)
-    }
-
-    @ViewBuilder
-    private func panelContent(_ panel: ReaderPanel) -> some View {
-        switch panel {
-        case .toc:
-            ReaderPanelSurface(title: panel.title, width: 286) {
-                tocContent
-            }
-        case .bookmarks:
-            ReaderPanelSurface(title: panel.title, width: 286) {
-                bookmarkContent
-            }
-        case .highlights:
-            ReaderPanelSurface(title: panel.title, width: 316) {
-                highlightsContent
-            }
-        case .search:
-            ReaderPanelSurface(title: panel.title, width: 286) {
-                searchContent
-            }
-        case .settings:
-            ReaderPanelSurface(title: panel.title, width: 306) {
-                settingsContent
-            }
-        case .flow:
-            ReaderPanelSurface(title: panel.title, width: 286) {
-                flowControls
-            }
+        .popover(item: panelBinding(for: panel), attachmentAnchor: .rect(.bounds), arrowEdge: .bottom) {
+            panelContent($0)
         }
     }
 
-    private var tocContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 1) {
-                if book.toc.isEmpty {
-                    panelEmpty(icon: "list.bullet", title: "没有目录", message: "这本书没有提供目录")
-                } else {
-                    ForEach(flatten(book.toc)) { entry in
-                        Button {
-                            navigateTo(href: entry.item.href)
-                        } label: {
-                            Text(entry.item.label)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.78))
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.leading, CGFloat(14 + entry.depth * 12))
-                                .padding(.trailing, 14)
-                                .padding(.vertical, 8)
-                        }
-                        .buttonStyle(.plain)
-                    }
+    private func panelBinding(for anchor: ReaderPanel) -> Binding<ReaderPanel?> {
+        Binding(
+            get: { activePanel?.anchor == anchor ? activePanel : nil },
+            set: { panel in
+                // 旧弹窗延迟关闭时, 不能清掉另一个按钮刚打开的弹窗.
+                if let panel {
+                    activePanel = panel
+                } else if activePanel?.anchor == anchor {
+                    activePanel = nil
                 }
             }
-            .padding(.vertical, 9)
+        )
+    }
+
+    private func panelContent(_ panel: ReaderPanel) -> some View {
+        ReaderPopoverContent(panel: panel) {
+            switch panel {
+            case .toc:
+                if tocIndex.entries.isEmpty {
+                    panelEmpty(icon: "list.bullet", title: "没有目录", message: "这本书没有提供目录")
+                } else {
+                    ReaderTOCView(
+                        entries: tocIndex.entries,
+                        currentEntryID: currentTOCEntryID,
+                        onNavigate: navigateTo(href:)
+                    )
+                }
+            case .bookmarks: bookmarkContent
+            case .highlights: highlightsContent
+            case .search: searchContent
+            case .settings: settingsContent
+            case .flow: flowControls.padding(14)
+            case .note: noteEditor
+            }
         }
-        .scrollIndicators(.hidden)
+        .onAppear {
+            focusedField = panel == .search || panel == .note ? panel : nil
+        }
+        .onExitCommand { activePanel = nil }
     }
 
     private var bookmarkContent: some View {
@@ -429,10 +399,10 @@ struct ReaderView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(currentChapterTitle)
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.88))
+                                .foregroundStyle(.primary)
                             Text("当前位置")
                                 .font(.system(size: 11))
-                                .foregroundStyle(OBooksPalette.secondaryText)
+                                .foregroundStyle(.secondary)
                         }
                         Spacer()
                     }
@@ -462,13 +432,13 @@ struct ReaderView: View {
                             .foregroundStyle(OBooksPalette.accent)
                             Text(annotation.text)
                                 .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.78))
+                                .foregroundStyle(.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(
-                            Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                            Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
                     }
                 }
             }
@@ -481,27 +451,28 @@ struct ReaderView: View {
         VStack(alignment: .leading, spacing: 17) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundStyle(OBooksPalette.secondaryText)
+                    .foregroundStyle(.secondary)
                 TextField("输入一个字词或页码", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.primary)
+                    .focused($focusedField, equals: .search)
                 if !searchQuery.isEmpty {
                     Button {
                         searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(OBooksPalette.secondaryText)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(OBooksIconButtonStyle(size: 26, cornerRadius: 7))
                 }
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 6))
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay {
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.white.opacity(0.13), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.13), lineWidth: 1)
             }
 
             HStack {
@@ -511,17 +482,17 @@ struct ReaderView: View {
                     .buttonStyle(.plain)
             }
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(OBooksPalette.secondaryText)
+            .foregroundStyle(.secondary)
 
             if searchQuery.isEmpty {
                 Text("输入关键词开始搜索")
                     .font(.system(size: 12))
-                    .foregroundStyle(OBooksPalette.tertiaryText)
+                    .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("搜索功能将在下一版连接到章节索引")
                     .font(.system(size: 12))
-                    .foregroundStyle(OBooksPalette.tertiaryText)
+                    .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
@@ -533,11 +504,11 @@ struct ReaderView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 0) {
                 sizeButton(title: "小", value: 16)
-                Rectangle().fill(Color.white.opacity(0.22)).frame(width: 1, height: 16)
+                Divider().frame(height: 16)
                 sizeButton(title: "大", value: 20)
             }
             .frame(height: 27)
-            .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
 
             LazyVGrid(
                 columns: [
@@ -560,10 +531,10 @@ struct ReaderView: View {
                     Text("自定义")
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
-                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
         }
@@ -622,11 +593,11 @@ struct ReaderView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(selected ? .white : OBooksPalette.secondaryText)
+                .foregroundStyle(selected ? Color.white : Color.primary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 26)
                 .background(
-                    selected ? OBooksPalette.accent.opacity(0.68) : Color.white.opacity(0.08),
+                    selected ? OBooksPalette.accent : Color.primary.opacity(0.06),
                     in: RoundedRectangle(cornerRadius: 6)
                 )
         }
@@ -639,11 +610,11 @@ struct ReaderView: View {
         } label: {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(abs(fontSize - value) < 0.1 ? .white : OBooksPalette.secondaryText)
+                .foregroundStyle(abs(fontSize - value) < 0.1 ? Color.primary : Color.secondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 27)
                 .background(
-                    abs(fontSize - value) < 0.1 ? Color.white.opacity(0.14) : .clear,
+                    abs(fontSize - value) < 0.1 ? Color.primary.opacity(0.12) : .clear,
                     in: RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
@@ -666,7 +637,7 @@ struct ReaderView: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
-                        theme == item ? Color.white.opacity(0.92) : Color.white.opacity(0.09),
+                        theme == item ? Color.accentColor : Color.primary.opacity(0.15),
                         lineWidth: theme == item ? 2 : 1)
             }
         }
@@ -715,29 +686,17 @@ struct ReaderView: View {
 
     private var noteEditor: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("添加笔记")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Button {
-                    isEditingNote = false
-                    scheduleChromeHide(after: .milliseconds(650))
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .buttonStyle(OBooksIconButtonStyle(size: 28, cornerRadius: 7))
-            }
             Text(noteContext)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
             TextEditor(text: $noteText)
                 .font(.system(size: 12))
+                .focused($focusedField, equals: .note)
                 .scrollContentBackground(.hidden)
                 .padding(6)
-                .frame(width: 270, height: 82)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+                .frame(height: 100)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
             Button("保存笔记") {
                 guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     noteRange.location != NSNotFound,
@@ -748,19 +707,16 @@ struct ReaderView: View {
                         text: noteText, kind: "note", sectionIndex: sectionIndex, range: noteRange),
                     at: 0
                 )
-                isEditingNote = false
-                scheduleChromeHide(after: .milliseconds(650))
+                activePanel = nil
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
         }
         .padding(14)
-        .frame(width: 300)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.16), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.3), radius: 18, y: 8)
+    }
+
+    private var toolbarForeground: Color {
+        colorScheme == .dark ? .white.opacity(0.78) : .black.opacity(0.78)
     }
 
     private var chromeBackground: Color {
@@ -824,10 +780,10 @@ struct ReaderView: View {
 
     private func scheduleChromeHide(after delay: Duration) {
         hideChromeTask?.cancel()
-        guard activePanel == nil, !isEditingNote, !isPointerNearChrome else { return }
+        guard activePanel == nil, !isPointerNearChrome else { return }
         hideChromeTask = Task { @MainActor in
             try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, activePanel == nil, !isEditingNote, !isPointerNearChrome else {
+            guard !Task.isCancelled, activePanel == nil, !isPointerNearChrome else {
                 return
             }
             chromeVisible = false
@@ -835,12 +791,7 @@ struct ReaderView: View {
     }
 
     private func togglePanel(_ panel: ReaderPanel) {
-        activePanel = activePanel == panel ? nil : panel
-        if activePanel == nil {
-            scheduleChromeHide(after: .milliseconds(650))
-        } else {
-            keepChromeVisible()
-        }
+        activePanel = activePanel?.anchor == panel ? nil : panel
     }
 
     private func moveSection(_ direction: Int) {
@@ -899,32 +850,17 @@ struct ReaderView: View {
         return decoded.hasPrefix("./") ? String(decoded.dropFirst(2)) : decoded
     }
 
-    private struct TOCEntry: Identifiable {
-        let item: EPUBTOCItem
-        let depth: Int
-        var id: UUID { item.id }
-    }
-
-    private func flatten(_ items: [EPUBTOCItem], depth: Int = 0) -> [TOCEntry] {
-        var result: [TOCEntry] = []
-        for item in items {
-            result.append(TOCEntry(item: item, depth: depth))
-            result.append(contentsOf: flatten(item.children, depth: depth + 1))
-        }
-        return result
-    }
-
     private func panelEmpty(icon: String, title: String, message: String) -> some View {
         VStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 22, weight: .light))
-                .foregroundStyle(OBooksPalette.secondaryText)
+                .foregroundStyle(.secondary)
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(.primary)
             Text(message)
                 .font(.system(size: 11))
-                .foregroundStyle(OBooksPalette.secondaryText)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -1070,43 +1006,5 @@ private struct ReaderFooter: View {
 
     private func seek(at x: CGFloat, width: CGFloat, animated: Bool) {
         onSeek(x, width, animated)
-    }
-}
-
-private struct ReaderPanelSurface<Content: View>: View {
-    let title: String
-    let width: CGFloat
-    let content: Content
-
-    init(title: String, width: CGFloat, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.width = width
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.68))
-                .frame(maxWidth: .infinity)
-                .frame(height: 38)
-            Rectangle()
-                .fill(Color.white.opacity(0.13))
-                .frame(height: 1)
-            content
-        }
-        .frame(width: width)
-        .frame(minHeight: 112, maxHeight: 760)
-        .background(
-            Color(red: 0.12, green: 0.12, blue: 0.12).opacity(0.97),
-            in: RoundedRectangle(cornerRadius: 11)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 11)
-                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
-        .padding(.horizontal, 26)
     }
 }

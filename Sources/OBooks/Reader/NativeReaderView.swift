@@ -16,6 +16,7 @@ struct NativeReaderView: NSViewRepresentable {
     let annotations: [ReaderAnnotation]
     @ObservedObject var controller: ReaderController
     let onProgress: (Double, ReadingPosition) -> Void
+    var onTOCSelection: (UUID?) -> Void = { _ in }
     let onPageInfo: (Int, Int) -> Void
     let onBoundary: (Int) -> Void
     let onSpeakingChanged: (Bool) -> Void
@@ -80,6 +81,7 @@ struct NativeReaderView: NSViewRepresentable {
             margin: margin,
             annotations: annotations,
             onProgress: onProgress,
+            onTOCSelection: onTOCSelection,
             onPageInfo: onPageInfo,
             onBoundary: onBoundary,
             onSpeakingChanged: onSpeakingChanged,
@@ -108,6 +110,7 @@ struct NativeReaderView: NSViewRepresentable {
             margin: margin,
             annotations: annotations,
             onProgress: onProgress,
+            onTOCSelection: onTOCSelection,
             onPageInfo: onPageInfo,
             onBoundary: onBoundary,
             onSpeakingChanged: onSpeakingChanged,
@@ -145,6 +148,7 @@ struct NativeReaderView: NSViewRepresentable {
         private weak var textView: ReaderTextView?
         private var scrollObserver: NSObjectProtocol?
         private var book: BookSummary?
+        private var tocIndex = ReaderTOCIndex(spine: [], items: [])
         private var requestedSectionIndex = 0
         private var lastInputSectionIndex: Int?
         private var pendingAnchor: String?
@@ -159,6 +163,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var speechRange: NSRange?
         private var speechBaseLocation = 0
         private var onProgress: (Double, ReadingPosition) -> Void = { _, _ in }
+        private var onTOCSelection: (UUID?) -> Void = { _ in }
         private var onPageInfo: (Int, Int) -> Void = { _, _ in }
         private var onBoundary: (Int) -> Void = { _ in }
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
@@ -264,6 +269,7 @@ struct NativeReaderView: NSViewRepresentable {
             margin: Double,
             annotations: [ReaderAnnotation],
             onProgress: @escaping (Double, ReadingPosition) -> Void,
+            onTOCSelection: @escaping (UUID?) -> Void = { _ in },
             onPageInfo: @escaping (Int, Int) -> Void = { _, _ in },
             onBoundary: @escaping (Int) -> Void,
             onSpeakingChanged: @escaping (Bool) -> Void,
@@ -282,6 +288,9 @@ struct NativeReaderView: NSViewRepresentable {
             }
             let preservedPosition = settingsChanged ? currentReadingPosition() : nil
             if settingsChanged { chapterDocuments.removeAll() }
+            if self.book?.id != book.id {
+                tocIndex = ReaderTOCIndex(spine: book.spine, items: book.toc)
+            }
             self.book = book
             if sectionChanged { requestedSectionIndex = sectionIndex }
             lastInputSectionIndex = sectionIndex
@@ -300,6 +309,7 @@ struct NativeReaderView: NSViewRepresentable {
             let annotationsChanged = self.annotations != annotations
             self.annotations = annotations
             self.onProgress = onProgress
+            self.onTOCSelection = onTOCSelection
             self.onPageInfo = onPageInfo
             self.onBoundary = onBoundary
             self.onSpeakingChanged = onSpeakingChanged
@@ -497,6 +507,7 @@ struct NativeReaderView: NSViewRepresentable {
             (scrollView as? ReaderScrollView)?.onPageTurnCompleted = nil
             (scrollView as? ReaderScrollView)?.onViewportSizeChanged = nil
             onProgress = { _, _ in }
+            onTOCSelection = { _ in }
             onPageInfo = { _, _ in }
             onBoundary = { _ in }
             onSpeakingChanged = { _ in }
@@ -867,6 +878,10 @@ struct NativeReaderView: NSViewRepresentable {
                 self.pendingProgress = nil
                 self.pendingReadingPosition = nil
                 self.onProgress(value, position)
+                let anchors = self.loadedBookContent
+                    ? self.sectionAnchors[position.spineID] ?? [:]
+                    : self.anchors
+                self.onTOCSelection(self.tocIndex.entryID(at: position, anchors: anchors))
             }
         }
 
