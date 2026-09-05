@@ -22,6 +22,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onSpeakingChanged: (Bool) -> Void
     let onAnnotation: (String, String, NSRange) -> Void
     let onNoteRequest: (String, NSRange) -> Void
+    var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
     var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
     let onNavigate: (Int, String?) -> Void
@@ -89,6 +90,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onAnnotationClick: onAnnotationClick,
             onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
@@ -120,6 +122,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onAnnotationClick: onAnnotationClick,
             onAnnotationAtSection: onAnnotationAtSection,
             onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
@@ -175,6 +178,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var onAnnotationClick: (ReaderAnnotation) -> Void = { _ in }
         private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
@@ -245,6 +249,9 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onNote = { [weak self] text, range in
                 self?.onNoteRequest(text, self?.localizedAnnotationRange(range) ?? range)
             }
+            textView.onAnnotationClick = { [weak self] annotation in
+                self?.onAnnotationClick(annotation)
+            }
             textView.annotationAtLocation = { [weak self] location in
                 self?.annotation(at: location)
             }
@@ -289,6 +296,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: @escaping (Bool) -> Void,
             onAnnotation: @escaping (String, String, NSRange) -> Void,
             onNoteRequest: @escaping (String, NSRange) -> Void,
+            onAnnotationClick: @escaping (ReaderAnnotation) -> Void = { _ in },
             onAnnotationAtSection: @escaping (String, String, Int, NSRange) -> Void = { _, _, _, _ in },
             onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
             onNavigate: @escaping (Int, String?) -> Void,
@@ -331,6 +339,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onSpeakingChanged = onSpeakingChanged
             self.onAnnotation = onAnnotation
             self.onNoteRequest = onNoteRequest
+            self.onAnnotationClick = onAnnotationClick
             self.onAnnotationAtSection = onAnnotationAtSection
             self.onRemoveAnnotation = onRemoveAnnotation
             self.onNavigate = onNavigate
@@ -531,6 +540,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
+            onAnnotationClick = { _ in }
             onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
             onNavigate = { _, _ in }
@@ -554,6 +564,7 @@ struct NativeReaderView: NSViewRepresentable {
             chapterDocuments.removeAll()
             textView?.onHighlight = nil
             textView?.onNote = nil
+            textView?.onAnnotationClick = nil
             textView?.annotationAtLocation = nil
             textView?.onRemoveAnnotation = nil
             textView?.onSpeak = nil
@@ -842,6 +853,7 @@ struct NativeReaderView: NSViewRepresentable {
                 if rendered.kind == "note" {
                     layoutManager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: range)
                     layoutManager.removeTemporaryAttribute(.underlineColor, forCharacterRange: range)
+                    layoutManager.removeTemporaryAttribute(.toolTip, forCharacterRange: range)
                 } else {
                     layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
                 }
@@ -882,7 +894,8 @@ struct NativeReaderView: NSViewRepresentable {
                 if annotation.kind == "note" {
                     layoutManager.addTemporaryAttributes([
                         .underlineStyle: NSUnderlineStyle.single.rawValue,
-                        .underlineColor: appearance.accent
+                        .underlineColor: appearance.accent,
+                        .toolTip: annotation.text
                     ], forCharacterRange: range)
                 } else {
                     layoutManager.addTemporaryAttribute(

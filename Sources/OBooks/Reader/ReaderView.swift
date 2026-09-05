@@ -100,6 +100,7 @@ struct ReaderView: View {
     @State private var noteContext = ""
     @State private var noteText = ""
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
+    @State private var editingAnnotationID: UUID?
     @FocusState private var focusedField: ReaderPanel?
 
     init(book: BookSummary) {
@@ -178,8 +179,13 @@ struct ReaderView: View {
                     noteContext = text
                     noteRange = range
                     noteText = ""
+                    editingAnnotationID = nil
                     activePanel = .note
                     keepChromeVisible()
+                },
+                onAnnotationClick: { annotation in
+                    guard annotation.kind == "note" else { return }
+                    beginEditingNote(annotation, inPanel: true)
                 },
                 onAnnotationAtSection: { text, kind, annotationSectionIndex, range in
                     addAnnotation(
@@ -461,11 +467,15 @@ struct ReaderView: View {
                 } else {
                     ForEach(visibleAnnotations) { annotation in
                         Button {
-                            registerJump()
-                            navigateTo(position: ReadingPosition(
-                                spineID: spineIdentity(book.spine[annotation.sectionIndex]),
-                                characterOffset: annotation.range.location
-                            ))
+                            if annotation.kind == "note" {
+                                beginEditingNote(annotation, inPanel: false)
+                            } else {
+                                registerJump()
+                                navigateTo(position: ReadingPosition(
+                                    spineID: spineIdentity(book.spine[annotation.sectionIndex]),
+                                    characterOffset: annotation.range.location
+                                ))
+                            }
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
                                 Text(annotation.quote ?? annotation.text)
@@ -496,6 +506,13 @@ struct ReaderView: View {
                             .background(Color.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 6))
                         }
                         .buttonStyle(.plain)
+                        .popover(
+                            isPresented: editingBinding(for: annotation),
+                            attachmentAnchor: .rect(.bounds),
+                            arrowEdge: .leading
+                        ) {
+                            noteEditor
+                        }
                         .contextMenu {
                             Button(
                                 annotation.kind == "note" ? "删除笔记" : "取消高亮",
@@ -750,38 +767,56 @@ struct ReaderView: View {
     }
 
     private var noteEditor: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "note.text")
+                    .foregroundStyle(OBooksPalette.accent)
+                Text(editingAnnotationID == nil ? "添加笔记" : "编辑笔记")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+            }
             Text(noteContext)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
             TextEditor(text: $noteText)
                 .font(.system(size: 12))
                 .focused($focusedField, equals: .note)
                 .scrollContentBackground(.hidden)
-                .padding(6)
-                .frame(height: 100)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
-            Button("保存笔记") {
-                guard !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                    noteRange.location != NSNotFound,
-                    noteRange.length > 0
-                else { return }
-                annotations.insert(
-                    ReaderAnnotation(
-                        text: noteText,
-                        kind: "note",
-                        sectionIndex: sectionIndex,
-                        range: noteRange,
-                        quote: noteContext
-                    ), at: 0)
-                persistAnnotations()
-                activePanel = nil
+                .padding(8)
+                .frame(height: 102)
+                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+            HStack(spacing: 8) {
+                Spacer()
+                Button {
+                    editingAnnotationID = nil
+                    if activePanel == .note { activePanel = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(OBooksIconButtonStyle(size: 28, cornerRadius: 8, normalBackgroundOpacity: 0.06))
+                .help("取消")
+                Button {
+                    saveNote()
+                } label: {
+                    Label("保存", systemImage: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 11)
+                        .frame(height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .background(OBooksPalette.accent, in: Capsule())
+                .help("保存笔记")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
         }
         .padding(14)
+        .frame(width: 292)
     }
 
     private var toolbarForeground: Color {
@@ -856,6 +891,71 @@ struct ReaderView: View {
 
     private func togglePanel(_ panel: ReaderPanel) {
         activePanel = activePanel?.anchor == panel ? nil : panel
+    }
+
+    private func editingBinding(for annotation: ReaderAnnotation) -> Binding<Bool> {
+        Binding(
+            get: { editingAnnotationID == annotation.id },
+            set: { isPresented in
+                if !isPresented, editingAnnotationID == annotation.id {
+                    editingAnnotationID = nil
+                }
+            }
+        )
+    }
+
+    private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool) {
+        guard annotation.kind == "note" else { return }
+        noteContext = annotation.quote ?? ""
+        noteRange = annotation.range
+        noteText = annotation.text
+        editingAnnotationID = annotation.id
+        registerJump()
+        guard book.spine.indices.contains(annotation.sectionIndex) else { return }
+        sectionIndex = annotation.sectionIndex
+        pendingAnchor = nil
+        let position = ReadingPosition(
+            spineID: spineIdentity(book.spine[annotation.sectionIndex]),
+            characterOffset: annotation.range.location
+        )
+        pendingPosition = position
+        pendingPositionAnimated = true
+        currentPosition = position
+        if inPanel {
+            activePanel = .note
+            keepChromeVisible()
+        }
+    }
+
+    private func saveNote() {
+        let trimmedText = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty,
+              noteRange.location != NSNotFound,
+              noteRange.length > 0 else { return }
+        if let editingAnnotationID,
+           let index = annotations.firstIndex(where: { $0.id == editingAnnotationID }) {
+            let annotation = annotations[index]
+            annotations[index] = ReaderAnnotation(
+                id: annotation.id,
+                text: trimmedText,
+                kind: "note",
+                sectionIndex: annotation.sectionIndex,
+                range: annotation.range,
+                quote: annotation.quote
+            )
+        } else {
+            annotations.insert(
+                ReaderAnnotation(
+                    text: trimmedText,
+                    kind: "note",
+                    sectionIndex: sectionIndex,
+                    range: noteRange,
+                    quote: noteContext
+                ), at: 0)
+        }
+        persistAnnotations()
+        editingAnnotationID = nil
+        if activePanel == .note { activePanel = nil }
     }
 
     private func addAnnotation(text: String, kind: String, range: NSRange, sectionIndex: Int? = nil) {

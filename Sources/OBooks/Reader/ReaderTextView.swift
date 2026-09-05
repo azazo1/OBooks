@@ -4,6 +4,7 @@ import AppKit
 final class ReaderTextView: NSTextView {
     var onHighlight: ((String, NSRange) -> Void)?
     var onNote: ((String, NSRange) -> Void)?
+    var onAnnotationClick: ((ReaderAnnotation) -> Void)?
     var annotationAtLocation: ((Int) -> ReaderAnnotation?)?
     var onRemoveAnnotation: ((UUID) -> Void)?
     var onSpeak: ((Int) -> Void)?
@@ -241,12 +242,26 @@ final class ReaderTextView: NSTextView {
         }
         // 单栏和双栏都按分页容器绘制, 选择位置也必须使用对应容器的坐标.
         guard pageColumns > 0 else {
+            if event.clickCount == 1, event.type == .leftMouseDown {
+                let location = characterLocation(for: event)
+                if let annotation = annotationAtLocation?(location), annotation.kind == "note" {
+                    onAnnotationClick?(annotation)
+                    return
+                }
+            }
             super.mouseDown(with: event)
             return
         }
         if event.clickCount == 1, let link = link(at: event) {
             onLink?(link)
             return
+        }
+        if event.clickCount == 1 {
+            let location = characterLocation(for: event)
+            if let annotation = annotationAtLocation?(location), annotation.kind == "note" {
+                onAnnotationClick?(annotation)
+                return
+            }
         }
         guard event.clickCount == 1,
               event.type == .leftMouseDown else {
