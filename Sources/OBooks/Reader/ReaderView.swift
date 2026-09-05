@@ -466,46 +466,44 @@ struct ReaderView: View {
                     panelEmpty(icon: "highlighter", title: "无高亮", message: "选中文字后可在这里查看")
                 } else {
                     ForEach(visibleAnnotations) { annotation in
-                        Button {
-                            if annotation.kind == "note" {
-                                beginEditingNote(annotation, inPanel: false)
-                            } else {
+                        VStack(spacing: 0) {
+                            Button {
                                 registerJump()
                                 navigateTo(position: ReadingPosition(
                                     spineID: spineIdentity(book.spine[annotation.sectionIndex]),
                                     characterOffset: annotation.range.location
                                 ))
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(annotation.quote ?? annotation.text)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.primary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                if annotation.kind == "note", annotation.quote != nil {
-                                    Text(annotation.text)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(.secondary)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text(annotation.quote ?? annotation.text)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(.primary)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                        .accessibilityLabel("笔记: \(annotation.text)")
+                                    if annotation.kind == "note", annotation.quote != nil {
+                                        Text(annotation.text)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .accessibilityLabel("笔记: \(annotation.text)")
+                                    }
+                                    HStack(spacing: 6) {
+                                        Image(systemName: annotation.kind == "note" ? "note.text" : "highlighter")
+                                        Text(annotation.kind == "note" ? "笔记" : "高亮")
+                                        Spacer()
+                                        Text("今天")
+                                    }
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(.secondary)
                                 }
-                                HStack(spacing: 6) {
-                                    Image(systemName: annotation.kind == "note" ? "note.text" : "highlighter")
-                                    Text(annotation.kind == "note" ? "笔记" : "高亮")
-                                    Spacer()
-                                    Text("今天")
-                                }
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 6))
                             }
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 6))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                         .popover(
                             isPresented: editingBinding(for: annotation),
                             attachmentAnchor: .rect(.bounds),
@@ -514,6 +512,11 @@ struct ReaderView: View {
                             noteEditor
                         }
                         .contextMenu {
+                            if annotation.kind == "note" {
+                                Button("编辑笔记", systemImage: "pencil") {
+                                    beginEditingNote(annotation, inPanel: false)
+                                }
+                            }
                             Button(
                                 annotation.kind == "note" ? "删除笔记" : "取消高亮",
                                 systemImage: annotation.kind == "note" ? "trash" : "highlighter.slash"
