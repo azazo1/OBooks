@@ -109,6 +109,25 @@ final class SpeechSessionTests: XCTestCase {
         XCTAssertFalse(fixture.session.state.isActive)
     }
 
+    func testHaltPlaybackStopsEngineWithoutPublishingIdle() async throws {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.isExpanded = true
+        let stops = fixture.engine.stopCount
+        fixture.session.haltPlayback()
+        XCTAssertEqual(fixture.session.state, .playing)
+        XCTAssertTrue(fixture.session.isExpanded)
+        XCTAssertGreaterThan(fixture.engine.stopCount, stops)
+        let call = try XCTUnwrap(fixture.engine.calls.last)
+        fixture.engine.onEvent?(.finished(call.id))
+        XCTAssertEqual(fixture.session.state, .playing)
+        fixture.session.stop()
+        XCTAssertEqual(fixture.session.state, .idle)
+        XCTAssertFalse(fixture.session.isExpanded)
+    }
+
     func testRapidSeekAndStopRejectPendingLoadsAndOldCallbacks() async throws {
         let fixture = Fixture(["First. Second.", "Elsewhere."])
         defer { fixture.close() }
@@ -229,12 +248,13 @@ final class FakeSpeechEngine: SpeechEngine {
     var onEvent: ((SpeechEngineEvent) -> Void)?
     var calls: [Call] = []
     var startsAutomatically = true
+    var stopCount = 0
     func speak(text: String, voiceIdentifier: String?, rate: Float, id: UUID) {
         calls.append(Call(id: id, text: text, voice: voiceIdentifier, rate: rate))
         if startsAutomatically { onEvent?(.started(id)) }
     }
     func pause() -> Bool { true }
     func resume() -> Bool { true }
-    func stop() {}
+    func stop() { stopCount += 1 }
     func finish() { if let id = calls.last?.id { onEvent?(.finished(id)) } }
 }

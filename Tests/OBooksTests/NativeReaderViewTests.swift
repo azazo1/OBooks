@@ -74,6 +74,62 @@ final class NativeReaderViewTests: XCTestCase {
         XCTAssertTrue(speakingStates.isEmpty)
     }
 
+    func testTeardownHaltsSpeechWithoutPublishingIdle() async {
+        let engine = FakeSpeechEngine()
+        let session = SpeechSession(engine: engine)
+        session.configure(spineIDs: ["one"], title: { _ in "" }, loadText: { _ in "Hello world." })
+        session.start(section: 0)
+        for _ in 0..<100 where session.state != .playing {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(session.state, .playing)
+
+        let coordinator = NativeReaderView.Coordinator(speech: session)
+        var speakingStates: [Bool] = []
+        coordinator.update(
+            book: BookSummary(
+                id: UUID(),
+                title: "Test",
+                authors: [],
+                sortTitle: "test",
+                sourceFileName: "test.epub",
+                folderName: UUID().uuidString,
+                coverPath: nil,
+                spine: [],
+                toc: [],
+                progressFraction: 0,
+                lastOpenedAt: nil,
+                importedAt: Date()
+            ),
+            sectionIndex: 0,
+            pendingAnchor: nil,
+            pendingPosition: nil,
+            pendingPositionAnimated: false,
+            theme: .focus,
+            fontSize: 18,
+            lineHeight: 1.7,
+            margin: 56,
+            annotations: [],
+            onProgress: { _, _ in },
+            onBoundary: { _ in },
+            onSpeakingChanged: { speakingStates.append($0) },
+            onAnnotation: { _, _, _ in },
+            onNoteRequest: { _, _ in },
+            onNavigate: { _, _ in },
+            onAnchorConsumed: {},
+            onPositionConsumed: {}
+        )
+        let stops = engine.stopCount
+        coordinator.teardown()
+        coordinator.teardown()
+        XCTAssertEqual(session.state, .playing)
+        XCTAssertGreaterThan(engine.stopCount, stops)
+        XCTAssertTrue(speakingStates.isEmpty)
+        XCTAssertNil(session.position)
+        session.stop()
+        XCTAssertEqual(session.state, .idle)
+    }
+
     func testDoublePageLayoutUsesParallelTextContainers() {
         let textView = ReaderTextView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
         textView.isEditable = false

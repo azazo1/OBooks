@@ -87,11 +87,11 @@ final class ReaderSpeechBridge {
     }
 
     func teardown() {
-        session.stop()
         session.onPosition = nil
         session.onStateChanged = nil
         session.onReveal = nil
         session.pageForSentence = nil
+        session.haltPlayback()
         follow.teardown()
         clearHighlight()
         textView?.allowsImagePreview = true

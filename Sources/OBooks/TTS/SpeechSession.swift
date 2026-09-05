@@ -120,6 +120,17 @@ final class SpeechSession: ObservableObject {
     }
 
     func stop() {
+        haltPlayback()
+        if isExpanded { isExpanded = false }
+        if isMinimized { isMinimized = false }
+        if errorMessage != nil { errorMessage = nil }
+        setState(.idle)
+        logger.info("停止朗读")
+    }
+
+    /// 停引擎和加载任务, 不写 @Published.
+    /// 供 NSViewRepresentable dismantle 使用, 避免 SwiftUI 在 GraphHost.invalidate 期间重入.
+    func haltPlayback() {
         revision &+= 1
         loadTask?.cancel()
         prefetchTask?.cancel()
@@ -131,11 +142,6 @@ final class SpeechSession: ObservableObject {
         engine.stop()
         position = nil
         indexes.removeAll()
-        isExpanded = false
-        isMinimized = false
-        errorMessage = nil
-        setState(.idle)
-        logger.info("停止朗读")
     }
 
     func playSentence(_ index: Int) {
