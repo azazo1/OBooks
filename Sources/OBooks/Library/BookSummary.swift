@@ -13,6 +13,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
     var progressFraction: Double
     var readingPosition: ReadingPosition?
     var bookmarks: [ReaderBookmark]
+    var annotations: [ReaderAnnotation]
     var isFinished: Bool
     var lastOpenedAt: Date?
     let importedAt: Date
@@ -34,7 +35,8 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         importedAt: Date,
         isFinished: Bool = false,
         readingPosition: ReadingPosition? = nil,
-        bookmarks: [ReaderBookmark] = []
+        bookmarks: [ReaderBookmark] = [],
+        annotations: [ReaderAnnotation] = []
     ) {
         self.id = id
         self.title = title
@@ -49,6 +51,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         self.isFinished = isFinished
         self.readingPosition = readingPosition
         self.bookmarks = bookmarks
+        self.annotations = annotations
         self.lastOpenedAt = lastOpenedAt
         self.importedAt = importedAt
     }
@@ -89,6 +92,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         case progressFraction
         case readingPosition
         case bookmarks
+        case annotations
         case isFinished
         case lastOpenedAt
         case importedAt
@@ -108,6 +112,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         progressFraction = try container.decode(Double.self, forKey: .progressFraction)
         readingPosition = try? container.decodeIfPresent(ReadingPosition.self, forKey: .readingPosition)
         bookmarks = try container.decodeIfPresent([ReaderBookmark].self, forKey: .bookmarks) ?? []
+        annotations = try container.decodeIfPresent([ReaderAnnotation].self, forKey: .annotations) ?? []
         isFinished = try container.decodeIfPresent(Bool.self, forKey: .isFinished) ?? false
         lastOpenedAt = try container.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         importedAt = try container.decode(Date.self, forKey: .importedAt)
@@ -127,6 +132,7 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         try container.encode(progressFraction, forKey: .progressFraction)
         try container.encodeIfPresent(readingPosition, forKey: .readingPosition)
         try container.encode(bookmarks, forKey: .bookmarks)
+        try container.encode(annotations, forKey: .annotations)
         try container.encode(isFinished, forKey: .isFinished)
         try container.encodeIfPresent(lastOpenedAt, forKey: .lastOpenedAt)
         try container.encode(importedAt, forKey: .importedAt)

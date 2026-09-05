@@ -124,6 +124,7 @@ struct ReaderView: View {
         {
             _currentTOCEntryID = State(initialValue: tocIndex.entryID(at: position, anchors: [:]))
         }
+        _annotations = State(initialValue: book.annotations)
     }
 
     var body: some View {
@@ -171,12 +172,7 @@ struct ReaderView: View {
                     isSpeaking = value
                 },
                 onAnnotation: { text, kind, range in
-                    guard !text.isEmpty else { return }
-                    annotations.insert(
-                        ReaderAnnotation(
-                            text: text, kind: kind, sectionIndex: sectionIndex, range: range),
-                        at: 0
-                    )
+                    addAnnotation(text: text, kind: kind, range: range)
                 },
                 onNoteRequest: { text, range in
                     noteContext = text
@@ -184,6 +180,9 @@ struct ReaderView: View {
                     noteText = ""
                     activePanel = .note
                     keepChromeVisible()
+                },
+                onRemoveAnnotation: { id in
+                    removeAnnotation(id: id)
                 },
                 onNavigate: { index, anchor in
                     registerJump()
@@ -448,26 +447,55 @@ struct ReaderView: View {
     private var highlightsContent: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 10) {
-                if annotations.isEmpty {
+                let visibleAnnotations = annotations.filter { book.spine.indices.contains($0.sectionIndex) }
+                if visibleAnnotations.isEmpty {
                     panelEmpty(icon: "highlighter", title: "无高亮", message: "选中文字后可在这里查看")
                 } else {
-                    ForEach(annotations) { annotation in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(
-                                annotation.kind == "note" ? "笔记" : "高亮",
-                                systemImage: annotation.kind == "note" ? "note.text" : "highlighter"
-                            )
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(OBooksPalette.accent)
-                            Text(annotation.text)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
+                    ForEach(visibleAnnotations) { annotation in
+                        Button {
+                            registerJump()
+                            navigateTo(position: ReadingPosition(
+                                spineID: spineIdentity(book.spine[annotation.sectionIndex]),
+                                characterOffset: annotation.range.location
+                            ))
+                        } label: {
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text(annotation.quote ?? annotation.text)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                if annotation.kind == "note", annotation.quote != nil {
+                                    Text(annotation.text)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .accessibilityLabel("笔记: \(annotation.text)")
+                                }
+                                HStack(spacing: 6) {
+                                    Image(systemName: annotation.kind == "note" ? "note.text" : "highlighter")
+                                    Text(annotation.kind == "note" ? "笔记" : "高亮")
+                                    Spacer()
+                                    Text("今天")
+                                }
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 6))
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(
+                                annotation.kind == "note" ? "删除笔记" : "取消高亮",
+                                systemImage: annotation.kind == "note" ? "trash" : "highlighter.slash"
+                            ) {
+                                removeAnnotation(id: annotation.id)
+                            }
+                        }
                     }
                 }
             }
@@ -733,9 +761,13 @@ struct ReaderView: View {
                 else { return }
                 annotations.insert(
                     ReaderAnnotation(
-                        text: noteText, kind: "note", sectionIndex: sectionIndex, range: noteRange),
-                    at: 0
-                )
+                        text: noteText,
+                        kind: "note",
+                        sectionIndex: sectionIndex,
+                        range: noteRange,
+                        quote: noteContext
+                    ), at: 0)
+                persistAnnotations()
                 activePanel = nil
             }
             .buttonStyle(.borderedProminent)
@@ -816,6 +848,28 @@ struct ReaderView: View {
 
     private func togglePanel(_ panel: ReaderPanel) {
         activePanel = activePanel?.anchor == panel ? nil : panel
+    }
+
+    private func addAnnotation(text: String, kind: String, range: NSRange) {
+        guard !text.isEmpty, range.length > 0 else { return }
+        if kind == "highlight" {
+            annotations = ReaderAnnotation.mergedHighlight(
+                text: text, sectionIndex: sectionIndex, range: range, into: annotations)
+        } else {
+            annotations.insert(
+                ReaderAnnotation(text: text, kind: kind, sectionIndex: sectionIndex, range: range), at: 0)
+        }
+        persistAnnotations()
+    }
+
+    private func removeAnnotation(id: UUID) {
+        guard annotations.contains(where: { $0.id == id }) else { return }
+        annotations.removeAll { $0.id == id }
+        persistAnnotations()
+    }
+
+    private func persistAnnotations() {
+        appModel.updateAnnotations(bookID: book.id, annotations: annotations)
     }
 
     private func moveSection(_ direction: Int) {

@@ -136,18 +136,80 @@ enum ReaderAction: Equatable {
     case stopSpeech
 }
 
-struct ReaderAnnotation: Identifiable, Equatable {
-    let id = UUID()
+struct ReaderAnnotation: Identifiable, Equatable, Codable, Hashable {
+    let id: UUID
     let text: String
+    let quote: String?
     let kind: String
     let sectionIndex: Int
     let range: NSRange
 
-    init(text: String, kind: String, sectionIndex: Int, range: NSRange) {
+    init(
+        id: UUID = UUID(),
+        text: String,
+        kind: String,
+        sectionIndex: Int,
+        range: NSRange,
+        quote: String? = nil
+    ) {
+        self.id = id
         self.text = text
+        self.quote = quote
         self.kind = kind
         self.sectionIndex = sectionIndex
         self.range = range
+    }
+
+    static func mergedHighlight(
+        text: String,
+        sectionIndex: Int,
+        range: NSRange,
+        into annotations: [ReaderAnnotation]
+    ) -> [ReaderAnnotation] {
+        guard range.length > 0 else { return annotations }
+        var mergedRange = range
+        var mergedText = text
+        var mergedSegments: [(range: NSRange, text: String)] = [(range, text)]
+        var result: [ReaderAnnotation] = []
+        var merged = false
+        for annotation in annotations {
+            guard annotation.kind == "highlight", annotation.sectionIndex == sectionIndex else {
+                result.append(annotation)
+                continue
+            }
+            let end = max(NSMaxRange(mergedRange), NSMaxRange(annotation.range))
+            let start = min(mergedRange.location, annotation.range.location)
+            let touches = NSMaxRange(annotation.range) >= mergedRange.location &&
+                annotation.range.location <= NSMaxRange(mergedRange)
+            guard touches else {
+                result.append(annotation)
+                continue
+            }
+            mergedRange = NSRange(location: start, length: end - start)
+            mergedSegments.append((annotation.range, annotation.text))
+            merged = true
+        }
+        if merged {
+            mergedSegments.sort { $0.range.location < $1.range.location }
+            mergedText = mergedSegments.dropFirst().reduce(mergedSegments.first?.text ?? mergedText) { result, segment in
+                let overlap = min(result.count, segment.text.count)
+                var common = 0
+                if overlap > 0 {
+                    for length in stride(from: overlap, through: 1, by: -1) {
+                        if result.suffix(length) == segment.text.prefix(length) {
+                            common = length
+                            break
+                        }
+                    }
+                }
+                return result + segment.text.dropFirst(common)
+            }
+        }
+        result.insert(
+            ReaderAnnotation(text: mergedText, kind: "highlight", sectionIndex: sectionIndex, range: mergedRange),
+            at: 0
+        )
+        return result
     }
 }
 

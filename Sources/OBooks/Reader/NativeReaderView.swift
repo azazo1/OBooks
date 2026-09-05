@@ -22,6 +22,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onSpeakingChanged: (Bool) -> Void
     let onAnnotation: (String, String, NSRange) -> Void
     let onNoteRequest: (String, NSRange) -> Void
+    var onRemoveAnnotation: (UUID) -> Void = { _ in }
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
@@ -87,6 +88,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed
@@ -116,6 +118,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: onSpeakingChanged,
             onAnnotation: onAnnotation,
             onNoteRequest: onNoteRequest,
+            onRemoveAnnotation: onRemoveAnnotation,
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed
@@ -159,7 +162,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var settings = Settings(theme: .focus, flow: .scrolling(scope: .chapter), fontSize: 18, lineHeight: 1.7, margin: 56)
         private var loadedSettings: Settings?
         private var annotations: [ReaderAnnotation] = []
-        private var renderedAnnotationRanges: [(range: NSRange, kind: String)] = []
+        private var renderedAnnotationRanges: [(id: UUID, range: NSRange, kind: String)] = []
         private var speechRange: NSRange?
         private var speechBaseLocation = 0
         private var onProgress: (Double, ReadingPosition) -> Void = { _, _ in }
@@ -169,6 +172,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onSpeakingChanged: (Bool) -> Void = { _ in }
         private var onAnnotation: (String, String, NSRange) -> Void = { _, _, _ in }
         private var onNoteRequest: (String, NSRange) -> Void = { _, _ in }
+        private var onRemoveAnnotation: (UUID) -> Void = { _ in }
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
@@ -237,6 +241,12 @@ struct NativeReaderView: NSViewRepresentable {
             textView.onNote = { [weak self] text, range in
                 self?.onNoteRequest(text, self?.localizedAnnotationRange(range) ?? range)
             }
+            textView.annotationAtLocation = { [weak self] location in
+                self?.annotation(at: location)
+            }
+            textView.onRemoveAnnotation = { [weak self] id in
+                self?.onRemoveAnnotation(id)
+            }
             textView.onSpeak = { [weak self] location in
                 self?.startSpeech(at: location)
             }
@@ -275,6 +285,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged: @escaping (Bool) -> Void,
             onAnnotation: @escaping (String, String, NSRange) -> Void,
             onNoteRequest: @escaping (String, NSRange) -> Void,
+            onRemoveAnnotation: @escaping (UUID) -> Void = { _ in },
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
             onPositionConsumed: @escaping () -> Void
@@ -315,6 +326,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onSpeakingChanged = onSpeakingChanged
             self.onAnnotation = onAnnotation
             self.onNoteRequest = onNoteRequest
+            self.onRemoveAnnotation = onRemoveAnnotation
             self.onNavigate = onNavigate
             self.onAnchorConsumed = onAnchorConsumed
             self.onPositionConsumed = onPositionConsumed
@@ -513,6 +525,7 @@ struct NativeReaderView: NSViewRepresentable {
             onSpeakingChanged = { _ in }
             onAnnotation = { _, _, _ in }
             onNoteRequest = { _, _ in }
+            onRemoveAnnotation = { _ in }
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
             onPositionConsumed = {}
@@ -534,6 +547,8 @@ struct NativeReaderView: NSViewRepresentable {
             chapterDocuments.removeAll()
             textView?.onHighlight = nil
             textView?.onNote = nil
+            textView?.annotationAtLocation = nil
+            textView?.onRemoveAnnotation = nil
             textView?.onSpeak = nil
             textView?.onLink = nil
         }
@@ -854,8 +869,15 @@ struct NativeReaderView: NSViewRepresentable {
                         forCharacterRange: range
                     )
                 }
-                renderedAnnotationRanges.append((range, annotation.kind))
+                renderedAnnotationRanges.append((annotation.id, range, annotation.kind))
             }
+        }
+
+        private func annotation(at location: Int) -> ReaderAnnotation? {
+            guard let rendered = renderedAnnotationRanges.first(where: {
+                NSLocationInRange(location, $0.range)
+            }) else { return nil }
+            return annotations.first { $0.id == rendered.id }
         }
 
         private func notifyProgress(_ value: Double, position: ReadingPosition) {

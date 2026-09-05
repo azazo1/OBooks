@@ -195,6 +195,13 @@ final class AppModel: ObservableObject {
         logger.info("移除书签: book=\(bookID), bookmark=\(bookmarkID)")
     }
 
+    func updateAnnotations(bookID: UUID, annotations: [ReaderAnnotation]) {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].annotations = annotations
+        libraryStore.save(books)
+        logger.info("更新高亮和笔记: book=\(bookID), count=\(annotations.count)")
+    }
+
     func toggleFinished(for bookID: UUID) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else {
             return

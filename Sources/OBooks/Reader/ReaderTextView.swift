@@ -4,12 +4,15 @@ import AppKit
 final class ReaderTextView: NSTextView {
     var onHighlight: ((String, NSRange) -> Void)?
     var onNote: ((String, NSRange) -> Void)?
+    var annotationAtLocation: ((Int) -> ReaderAnnotation?)?
+    var onRemoveAnnotation: ((UUID) -> Void)?
     var onSpeak: ((Int) -> Void)?
     var onLink: ((URL) -> Void)?
     var preferredReadingWidth: CGFloat = 820
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
     private var contextLocation = 0
+    private var contextAnnotationID: UUID?
     private var cursorTrackingArea: NSTrackingArea?
     private var pageColumns = 0
     private(set) var pageViewportHeight: CGFloat = 0
@@ -395,13 +398,24 @@ final class ReaderTextView: NSTextView {
     }
     override func menu(for event: NSEvent) -> NSMenu? {
         let range = validSelectionRange() ?? NSRange(location: 0, length: 0)
-        contextLocation = range.length > 0 ? range.location : characterLocation(for: event)
+        let clickedLocation = characterLocation(for: event)
+        contextLocation = range.length > 0 ? range.location : clickedLocation
+        let annotation = annotationAtLocation?(clickedLocation)
+            ?? (range.length > 0 ? annotationAtLocation?(range.location) : nil)
+        contextAnnotationID = annotation?.id
         let menu = NSMenu(title: "阅读")
         menu.autoenablesItems = false
 
         if range.length > 0 {
             menu.addItem(menuItem(title: "高亮", symbol: "highlighter", action: #selector(highlightSelection)))
             menu.addItem(menuItem(title: "添加笔记", symbol: "note.text", action: #selector(addNote)))
+        }
+        if let annotation {
+            menu.addItem(menuItem(
+                title: annotation.kind == "note" ? "删除笔记" : "取消高亮",
+                symbol: annotation.kind == "note" ? "trash" : "highlighter.slash",
+                action: #selector(removeAnnotation)
+            ))
         }
         menu.addItem(menuItem(title: "从此处开始朗读", symbol: "speaker.wave.2", action: #selector(speakFromSelection)))
         if range.length > 0 {
@@ -414,7 +428,6 @@ final class ReaderTextView: NSTextView {
     @objc private func highlightSelection() {
         guard let range = validSelectionRange(), range.length > 0 else { return }
         onHighlight?((string as NSString).substring(with: range), range)
-        setSelectedRange(NSRange(location: range.location + range.length, length: 0))
     }
 
     @objc private func addNote() {
@@ -428,6 +441,12 @@ final class ReaderTextView: NSTextView {
 
     @objc private func copySelection() {
         copy(nil)
+    }
+
+    @objc private func removeAnnotation() {
+        guard let id = contextAnnotationID else { return }
+        onRemoveAnnotation?(id)
+        contextAnnotationID = nil
     }
 
     private func updateReadingInsets(for width: CGFloat) {

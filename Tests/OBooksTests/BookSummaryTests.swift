@@ -112,6 +112,33 @@ final class BookSummaryTests: XCTestCase {
         XCTAssertNil(restored.readingPosition)
     }
 
+    func testOverlappingHighlightsMergeTheirTextAndRange() {
+        let first = ReaderAnnotation(text: "AB", kind: "highlight", sectionIndex: 0, range: NSRange(location: 0, length: 2))
+        let merged = ReaderAnnotation.mergedHighlight(
+            text: "BC", sectionIndex: 0, range: NSRange(location: 1, length: 2), into: [first])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].text, "ABC")
+        XCTAssertEqual(merged[0].range, NSRange(location: 0, length: 3))
+    }
+
+    func testAnnotationsRoundTripAndLegacyDataDefaultsToEmpty() throws {
+        var book = makeBook(progressFraction: 0)
+        book.annotations = [ReaderAnnotation(
+            text: "Marked", kind: "highlight", sectionIndex: 0, range: NSRange(location: 4, length: 6)
+        )]
+        let restored = try JSONDecoder().decode(BookSummary.self, from: JSONEncoder().encode(book))
+        XCTAssertEqual(restored.annotations, book.annotations)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(book)) as? [String: Any])
+        object.removeValue(forKey: "annotations")
+        let legacy = try JSONDecoder().decode(
+            BookSummary.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+        XCTAssertTrue(legacy.annotations.isEmpty)
+    }
+
     private func makeBook(progressFraction: Double) -> BookSummary {
         BookSummary(
             id: UUID(),
