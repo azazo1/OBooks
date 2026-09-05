@@ -215,9 +215,12 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         nsView.onMagnify = onMagnify
         nsView.onScroll = onScroll
         nsView.onExport = onExport
+        if isInteractive {
+            nsView.window?.makeFirstResponder(nsView)
+        }
     }
 
-    final class ClickView: NSView {
+    final class ClickView: NSView, ReaderKeyboardExclusive {
         var imageRect: CGRect = .zero
         var isInteractive = false
         var allowsPan = false
@@ -235,15 +238,17 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
         private var isPanning = false
         private var didPress = false
         private var scrollMonitor: Any?
+        private var keyMonitor: Any?
 
         override var isOpaque: Bool { false }
         override var isFlipped: Bool { true }
+        override var acceptsFirstResponder: Bool { true }
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            removeScrollMonitor()
+            removeMonitors()
             guard window != nil else { return }
             scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 guard let self,
@@ -255,10 +260,31 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
                 self.onScroll?(event)
                 return nil
             }
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self,
+                      event.window === self.window,
+                      self.window === NSApp.keyWindow,
+                      self.isInteractive else { return event }
+                if event.modifierFlags.contains(.command) { return event }
+                if ReaderKeyNavigation.isEscape(event) {
+                    self.onClose?()
+                }
+                return nil
+            }
+            if isInteractive {
+                window?.makeFirstResponder(self)
+            }
         }
 
         deinit {
-            removeScrollMonitor()
+            removeMonitors()
+        }
+
+        override func keyDown(with event: NSEvent) {
+            if ReaderKeyNavigation.isEscape(event) {
+                onClose?()
+                return
+            }
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -337,11 +363,15 @@ private struct ReaderImagePreviewClickCatcher: NSViewRepresentable {
             onExport?()
         }
 
-        private func removeScrollMonitor() {
+        private func removeMonitors() {
             if let scrollMonitor {
                 NSEvent.removeMonitor(scrollMonitor)
             }
             scrollMonitor = nil
+            if let keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+            }
+            keyMonitor = nil
         }
     }
 }

@@ -272,6 +272,42 @@ final class ReaderPageNavigationTests: XCTestCase {
         XCTAssertEqual(session.position?.range.location, 0)
     }
 
+    func testArrowKeysTurnPagesInPagingMode() throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.rightArrow))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 600)
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.leftArrow))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.downArrow))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 600)
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.upArrow))
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+    }
+
+    func testArrowKeysScrollInScrollingMode() async throws {
+        let reader = try Fixture(flow: .scrolling(scope: .chapter))
+        defer { reader.close() }
+        try await Task.sleep(for: .milliseconds(30))
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.downArrow))
+        XCTAssertGreaterThan(try XCTUnwrap(reader.scrollView.scrollTargetY), 0)
+        reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.rightArrow))
+        XCTAssertGreaterThan(try XCTUnwrap(reader.scrollView.scrollTargetY), 0)
+    }
+
+    private func arrow(_ code: UInt16) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
+            context: nil, characters: "", charactersIgnoringModifiers: "",
+            isARepeat: false, keyCode: code
+        ))
+    }
+
     private func wheel(delta: Int32, verticalDelta: Int32 = 0, phase: NSEvent.Phase, momentum: NSEvent.Phase = [], time: Double) throws -> NSEvent {
         let event = try XCTUnwrap(CGEvent(
             scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,

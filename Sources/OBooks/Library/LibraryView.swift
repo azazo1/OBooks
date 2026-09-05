@@ -47,6 +47,7 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var isDropTargeted = false
     @State private var bookPendingDeletion: BookSummary?
+    @FocusState private var searchFocused: Bool
 
     private var visibleBooks: [BookSummary] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -65,7 +66,12 @@ struct LibraryView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            LibrarySidebar(selection: $destination, query: $query, onImport: appModel.importEPUB)
+            LibrarySidebar(
+                selection: $destination,
+                query: $query,
+                searchFocused: $searchFocused,
+                onImport: appModel.importEPUB
+            )
             Rectangle()
                 .fill(Color.white.opacity(0.08))
                 .frame(width: 1)
@@ -105,6 +111,11 @@ struct LibraryView: View {
         }
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .obooksSearchRequested)) { notification in
+            let window = notification.object as? NSWindow ?? NSApp.keyWindow
+            guard window === NSApp.keyWindow, !(window is ReaderWindow) else { return }
+            searchFocused = true
         }
         .alert(
             appModel.alert?.title ?? "提示",

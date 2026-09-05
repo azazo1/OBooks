@@ -14,7 +14,7 @@ final class ReaderScrollView: NSScrollView {
     var onPageTurnCompleted: (() -> Void)?
     var onViewportSizeChanged: ((Int?, CGFloat?) -> Void)?
     private(set) var pageFlow: ReaderFlowMode = .scrolling(scope: .chapter)
-    private var scrollTargetY: CGFloat?
+    private(set) var scrollTargetY: CGFloat?
     private var speechScroll = false
     private var refreshLink: CADisplayLink?
     private var lastFrameTimestamp: CFTimeInterval?
@@ -23,6 +23,8 @@ final class ReaderScrollView: NSScrollView {
     private var gesture: ReaderPageTurnGesture?
     private var gestureRejected = false
     private var lastWheelTurn: TimeInterval = -.infinity
+    var onKeyboardNavigate: ((Int) -> Void)?
+    private var keyMonitor: Any?
 
     var isPageTransitionActive: Bool { preparingPage || transition != nil }
 
@@ -72,6 +74,11 @@ final class ReaderScrollView: NSScrollView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { prepareForProgrammaticScroll() }
+        installKeyMonitor()
+    }
+
+    deinit {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -107,6 +114,32 @@ final class ReaderScrollView: NSScrollView {
         pageFlow = flow
         verticalScrollElasticity = flow.isPaging ? .none : .automatic
         horizontalScrollElasticity = .none
+    }
+
+    func handleKeyboardNavigate(_ direction: Int) {
+        if let onKeyboardNavigate {
+            onKeyboardNavigate(direction)
+            return
+        }
+        _ = turnPage(direction: direction)
+    }
+
+    private func installKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        guard window != nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyEvent(event)
+        }
+    }
+
+    private func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
+        guard event.window === window, window?.isKeyWindow == true else { return event }
+        guard !ReaderKeyNavigation.isEditingText(in: window) else { return event }
+        guard let direction = ReaderKeyNavigation.pageDirection(for: event) else { return event }
+        handleKeyboardNavigate(direction)
+        return nil
     }
 
     @discardableResult

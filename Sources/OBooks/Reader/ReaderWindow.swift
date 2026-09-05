@@ -16,6 +16,14 @@ final class ReaderWindow: NSWindow {
         }
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if ReaderKeyNavigation.isFind(event), attachedSheet == nil {
+            NotificationCenter.default.post(name: .obooksSearchRequested, object: self)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     private func withVisibleCloseButton<Result>(_ action: () -> Result) -> Result {
         guard let button = standardWindowButton(.closeButton) else { return action() }
         // AppKit 会拒绝关闭按钮透明的窗口, 同步恢复透明度以保留原生关闭校验和代理回调.

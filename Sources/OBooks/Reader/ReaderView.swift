@@ -216,6 +216,7 @@ struct ReaderView: View {
                     hideChromeTask?.cancel()
                     chromeVisible = false
                 },
+                onFind: openSearch,
                 onNavigate: { index, anchor in
                     registerJump()
                     navigateTo(sectionIndex: index, anchor: anchor)
@@ -348,7 +349,9 @@ struct ReaderView: View {
             progressState.flush()
         }
         .onExitCommand {
-            if controller.speech.isPlayerVisible, controller.speech.isExpanded {
+            if activeImage != nil {
+                return
+            } else if controller.speech.isPlayerVisible, controller.speech.isExpanded {
                 controller.speech.isExpanded = false
             } else if activePanel != nil {
                 activePanel = nil
@@ -1013,6 +1016,13 @@ struct ReaderView: View {
             return
         }
         activePanel = activePanel?.anchor == panel ? nil : panel
+    }
+
+    private func openSearch() {
+        guard !isOpening, activeImage == nil else { return }
+        keepChromeVisible()
+        activePanel = .search
+        focusedField = .search
     }
 
     private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool, navigate: Bool = true) {

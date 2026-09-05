@@ -27,6 +27,7 @@ struct NativeReaderView: NSViewRepresentable {
     var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
     var onRemoveAnnotation: (UUID) -> Void = { _ in }
     var onImageClick: (NSImage, NSRect) -> Void = { _, _ in }
+    var onFind: () -> Void = {}
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
@@ -55,7 +56,7 @@ struct NativeReaderView: NSViewRepresentable {
         textView.isSelectable = true
         textView.isRichText = true
         textView.allowsUndo = false
-        textView.usesFindPanel = true
+        textView.usesFindPanel = false
         textView.importsGraphics = true
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -74,6 +75,7 @@ struct NativeReaderView: NSViewRepresentable {
         scrollView.documentView = textView
 
         context.coordinator.attach(scrollView: scrollView, textView: textView)
+        context.coordinator.onFind = onFind
         context.coordinator.update(
             book: book,
             sectionIndex: sectionIndex,
@@ -109,6 +111,7 @@ struct NativeReaderView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coordinator = context.coordinator
         coordinator.speechBridge.overlayRect = speechOverlayRect
+        coordinator.onFind = onFind
         coordinator.update(
             book: book,
             sectionIndex: sectionIndex,
@@ -169,6 +172,7 @@ struct NativeReaderView: NSViewRepresentable {
         private weak var scrollView: NSScrollView?
         private weak var textView: ReaderTextView?
         private var scrollObserver: NSObjectProtocol?
+        private var searchObserver: NSObjectProtocol?
         private var book: BookSummary?
         private var tocIndex = ReaderTOCIndex(spine: [], items: [])
         private var requestedSectionIndex = 0
@@ -193,6 +197,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onAnnotationAtSection: (String, String, Int, NSRange) -> Void = { _, _, _, _ in }
         private var onRemoveAnnotation: (UUID) -> Void = { _ in }
         private var onImageClick: (NSImage, NSRect) -> Void = { _, _ in }
+        var onFind: () -> Void = {}
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
@@ -229,6 +234,9 @@ struct NativeReaderView: NSViewRepresentable {
             if let scrollObserver {
                 NotificationCenter.default.removeObserver(scrollObserver)
             }
+            if let searchObserver {
+                NotificationCenter.default.removeObserver(searchObserver)
+            }
         }
 
         func attach(scrollView: NSScrollView, textView: ReaderTextView) {
@@ -260,6 +268,12 @@ struct NativeReaderView: NSViewRepresentable {
                 readerScrollView.onPageTurnCompleted = { [weak self] in
                     if self?.speech.state.isActive == true { self?.speechBridge.refresh(followPosition: true) }
                     self?.reportProgress()
+                }
+                readerScrollView.onKeyboardNavigate = { [weak self] direction in
+                    guard let self else { return }
+                    self.handleUserInteraction()
+                    self.speechBridge.follow.userInteraction()
+                    self.turnPage(direction: direction)
                 }
                 readerScrollView.onViewportSizeChanged = { [weak self] location, viewportOffset in
                     guard let self, self.loadedSettings != nil else { return }
@@ -301,6 +315,22 @@ struct NativeReaderView: NSViewRepresentable {
             }
             textView.onImageClick = { [weak self] image, rect in
                 self?.onImageClick(image, rect)
+            }
+
+            if let searchObserver {
+                NotificationCenter.default.removeObserver(searchObserver)
+            }
+            searchObserver = NotificationCenter.default.addObserver(
+                forName: .obooksSearchRequested,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                MainActor.assumeIsolated {
+                    guard let self, let window = self.scrollView?.window else { return }
+                    let target = notification.object as? NSWindow ?? NSApp.keyWindow
+                    guard target === window, window.isKeyWindow else { return }
+                    self.onFind()
+                }
             }
 
             scrollView.contentView.postsBoundsChangedNotifications = true
@@ -642,6 +672,9 @@ struct NativeReaderView: NSViewRepresentable {
         private func notifyContentReady() {
             guard !didNotifyContentReady else { return }
             didNotifyContentReady = true
+            if let textView {
+                textView.window?.makeFirstResponder(textView)
+            }
             onContentReady()
         }
 
@@ -680,10 +713,15 @@ struct NativeReaderView: NSViewRepresentable {
                 NotificationCenter.default.removeObserver(scrollObserver)
             }
             scrollObserver = nil
+            if let searchObserver {
+                NotificationCenter.default.removeObserver(searchObserver)
+            }
+            searchObserver = nil
             (scrollView as? ReaderScrollView)?.onUserScroll = nil
             (scrollView as? ReaderScrollView)?.pageTurn = nil
             (scrollView as? ReaderScrollView)?.onPageTurnCompleted = nil
             (scrollView as? ReaderScrollView)?.onViewportSizeChanged = nil
+            (scrollView as? ReaderScrollView)?.onKeyboardNavigate = nil
             onProgress = { _, _ in }
             onTOCSelection = { _ in }
             onPageInfo = { _, _ in }
@@ -695,6 +733,7 @@ struct NativeReaderView: NSViewRepresentable {
             onAnnotationAtSection = { _, _, _, _ in }
             onRemoveAnnotation = { _ in }
             onImageClick = { _, _ in }
+            onFind = {}
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
             onPositionConsumed = {}

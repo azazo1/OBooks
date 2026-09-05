@@ -31,6 +31,15 @@ struct OBooksApp: App {
                 }
                 .keyboardShortcut(.return, modifiers: [.command])
             }
+            CommandGroup(after: .textEditing) {
+                Button("搜索") {
+                    NotificationCenter.default.post(
+                        name: .obooksSearchRequested,
+                        object: NSApp.keyWindow
+                    )
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
         }
 
         Window("关于 OBooks", id: "about") {

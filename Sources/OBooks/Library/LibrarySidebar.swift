@@ -3,6 +3,7 @@ import SwiftUI
 struct LibrarySidebar: View {
     @Binding var selection: LibraryDestination
     @Binding var query: String
+    var searchFocused: FocusState<Bool>.Binding
     let onImport: () -> Void
 
     var body: some View {
@@ -25,6 +26,7 @@ struct LibrarySidebar: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .foregroundStyle(.white.opacity(0.86))
+                        .focused(searchFocused)
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 29)

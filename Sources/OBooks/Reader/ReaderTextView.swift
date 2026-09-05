@@ -195,26 +195,17 @@ final class ReaderTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let navigates = [49, 115, 116, 119, 121, 123, 124, 125, 126].contains(Int(event.keyCode))
-        if navigates { onSpeechInteraction?(true) }
-        defer { if navigates { onSpeechInteraction?(false) } }
-        guard pageColumns > 0,
-              event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-              !event.modifierFlags.contains(.shift) || event.keyCode == 49,
-              let scrollView = enclosingScrollView as? ReaderScrollView else {
-            super.keyDown(with: event)
+        if let direction = ReaderKeyNavigation.pageDirection(for: event),
+           let scrollView = enclosingScrollView as? ReaderScrollView {
+            scrollView.handleKeyboardNavigate(direction)
             return
         }
-        let direction: Int
-        switch event.keyCode {
-        case 49: direction = event.modifierFlags.contains(.shift) ? -1 : 1
-        case 123, 126, 116: direction = -1
-        case 124, 125, 121: direction = 1
-        default:
-            super.keyDown(with: event)
-            return
-        }
-        scrollView.turnPage(direction: direction)
+        super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if ReaderKeyNavigation.isFind(event) { return false }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func scrollRangeToVisible(_ range: NSRange) {
