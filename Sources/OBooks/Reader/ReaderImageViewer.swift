@@ -12,6 +12,7 @@ struct ReaderImageViewer: View {
     @State private var dragStart: CGSize?
     @State private var presentationProgress: CGFloat = 0
     @State private var isClosing = false
+    @State private var isTitleHovered = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -46,6 +47,7 @@ struct ReaderImageViewer: View {
                 Color.black.opacity(0.94)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
+                    .opacity(0.94 * presentationProgress)
                     .onTapGesture(perform: requestClose)
 
                 Image(nsImage: image)
@@ -118,9 +120,18 @@ struct ReaderImageViewer: View {
 
                 VStack(spacing: 0) {
                     ZStack {
+                        let titleCovered = visibleRect.minY < 52 && visibleRect.maxY > 0 && visibleRect.minX < geometry.size.width * 0.72 && visibleRect.maxX > geometry.size.width * 0.28
                         Text("图片预览")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.86))
+                            .padding(.horizontal, 12)
+                            .frame(height: 30)
+                            .background {
+                                if !titleCovered || isTitleHovered {
+                                    Capsule().fill(.black.opacity(0.28))
+                                }
+                            }
+                            .onHover { isTitleHovered = $0 }
                         HStack(spacing: 10) {
                             Spacer()
                             Text("\(Int(zoom * 100))%")
@@ -133,32 +144,53 @@ struct ReaderImageViewer: View {
                                     .frame(width: 28, height: 28)
                             }
                             .buttonStyle(.plain)
-                            .background(Color.white.opacity(0.12), in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                            .overlay {
+                                Circle()
+                                    .fill(Color.white.opacity(0.12))
+                                    .frame(width: 28, height: 28)
+                                    .allowsHitTesting(false)
+                            }
                             .help("关闭图片预览")
                         }
                         .padding(.horizontal, 18)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(.black.opacity(0.28 * presentationProgress))
                     Spacer()
                 }
                 .opacity(presentationProgress)
                 .allowsHitTesting(true)
 
-                ReaderImageViewerEventMonitor { delta in
-                    let step = max(-0.65, min(0.65, delta * 0.012))
+                ReaderImageViewerEventMonitor { event in
                     guard presentationProgress > 0.99, !isClosing else { return }
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        zoom = clampedZoom(zoom + step, fitScale: fitScale)
-                        offset = clampedOffset(
-                            offset,
-                            displayedSize: CGSize(
-                                width: baseSize.width * zoom,
-                                height: baseSize.height * zoom
-                            ),
-                            contentSize: contentSize
-                        )
+                    let isZooming = event.modifierFlags.contains(.command)
+                    let isHorizontal = event.modifierFlags.contains(.shift)
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        if isZooming {
+                            let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
+                            let step = max(-0.65, min(0.65, delta * 0.012))
+                            zoom = clampedZoom(zoom + step, fitScale: fitScale)
+                            offset = clampedOffset(
+                                offset,
+                                displayedSize: CGSize(width: baseSize.width * zoom, height: baseSize.height * zoom),
+                                contentSize: contentSize
+                            )
+                        } else if isHorizontal {
+                            let delta = event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.scrollingDeltaY
+                            offset = clampedOffset(
+                                CGSize(width: offset.width + delta, height: offset.height),
+                                displayedSize: displayedSize,
+                                contentSize: contentSize
+                            )
+                        } else {
+                            offset = clampedOffset(
+                                CGSize(width: offset.width, height: offset.height + event.scrollingDeltaY),
+                                displayedSize: CGSize(width: baseSize.width * zoom, height: baseSize.height * zoom),
+                                contentSize: contentSize
+                            )
+                        }
                     }
                 }
                 .frame(width: 1, height: 1)
@@ -221,7 +253,7 @@ struct ReaderImageViewer: View {
 }
 
 private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
-    let onScroll: (CGFloat) -> Void
+    let onScroll: (NSEvent) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onScroll: onScroll)
@@ -240,10 +272,10 @@ private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
     }
 
     final class Coordinator {
-        let onScroll: (CGFloat) -> Void
+        let onScroll: (NSEvent) -> Void
         var monitor: Any?
 
-        init(onScroll: @escaping (CGFloat) -> Void) {
+        init(onScroll: @escaping (NSEvent) -> Void) {
             self.onScroll = onScroll
         }
 
@@ -251,9 +283,8 @@ private struct ReaderImageViewerEventMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
                 guard let self,
                       event.window === NSApp.keyWindow else { return event }
-                let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.scrollingDeltaX
-                guard delta != 0 else { return event }
-                onScroll(delta)
+                guard event.scrollingDeltaX != 0 || event.scrollingDeltaY != 0 else { return event }
+                onScroll(event)
                 return nil
             }
         }

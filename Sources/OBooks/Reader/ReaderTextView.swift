@@ -23,6 +23,7 @@ final class ReaderTextView: NSTextView {
     private var isUpdatingPageLayout = false
     private var selectionAnchorLocation: Int?
     private var isSelectingPageText = false
+    private var pendingImageHit: (image: NSImage, rect: NSRect)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -232,7 +233,7 @@ final class ReaderTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 1, let hit = imageHit(at: event) {
-            onImageClick?(hit.image, hit.rect)
+            pendingImageHit = hit
             return
         }
         if pageColumns > 0, event.clickCount == 1,
@@ -281,6 +282,7 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        pendingImageHit = nil
         guard pageColumns > 0,
               isSelectingPageText,
               let anchor = selectionAnchorLocation else {
@@ -296,6 +298,12 @@ final class ReaderTextView: NSTextView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if event.clickCount == 1, let hit = pendingImageHit {
+            pendingImageHit = nil
+            onImageClick?(hit.image, hit.rect)
+            return
+        }
+        pendingImageHit = nil
         guard pageColumns > 0,
               isSelectingPageText else {
             super.mouseUp(with: event)
