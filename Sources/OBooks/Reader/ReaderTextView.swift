@@ -12,7 +12,7 @@ final class ReaderTextView: NSTextView {
     var onImageClick: ((NSImage, NSRect) -> Void)?
     var allowsImagePreview = true
     var onSpeechInteraction: ((Bool) -> Void)?
-    var preferredReadingWidth: CGFloat = 820
+    var preferredReadingWidth: CGFloat = 1150
     var minimumHorizontalInset: CGFloat = 34
     private var verticalInset: CGFloat = 52
     private var contextLocation = 0

@@ -64,7 +64,7 @@ struct NativeReaderView: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
-        textView.preferredReadingWidth = 820
+        textView.preferredReadingWidth = 1150
         textView.minimumHorizontalInset = 34
         textView.linkTextAttributes = [
             .foregroundColor: NSColor.systemBlue,
