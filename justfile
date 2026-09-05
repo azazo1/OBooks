@@ -22,3 +22,9 @@ run:
 # 清理 SwiftPM 构建产物.
 clean:
     swift package clean
+
+# just dist
+# 根据当前平台生成 macOS 发布产物.
+[macos]
+dist:
+    ./scripts/dist-macos.sh

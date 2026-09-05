@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">OBooks 应用图标</title>
+  <desc id="description">石墨灰圆角底板上, 蓝色字母 O 环抱展开的白色书页, 右页夹着珊瑚红书签.</desc>
+  <defs>
+    <linearGradient id="tile" x1="232" y1="64" x2="760" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#343B43"/>
+      <stop offset="1" stop-color="#171B21"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="512" y1="64" x2="512" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="336" y1="232" x2="700" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7ACBFF"/>
+      <stop offset="0.5" stop-color="#4A9EF0"/>
+      <stop offset="1" stop-color="#3679CE"/>
+    </linearGradient>
+    <linearGradient id="left-page" x1="256" y1="472" x2="502" y2="656" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.7" stop-color="#F2F5F8"/>
+      <stop offset="1" stop-color="#CCD6E1"/>
+    </linearGradient>
+    <linearGradient id="right-page" x1="530" y1="600" x2="764" y2="452" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E5ECF3"/>
+      <stop offset="0.55" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <linearGradient id="bookmark" x1="680" y1="419" x2="680" y2="568" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9D89"/>
+      <stop offset="1" stop-color="#EF705F"/>
+    </linearGradient>
+    <filter id="tile-shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="15" flood-color="#10151C" flood-opacity="0.2"/>
+    </filter>
+    <filter id="book-shadow" x="160" y="348" width="704" height="500" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="16" flood-color="#070D16" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <g id="background" filter="url(#tile-shadow)">
+    <rect x="64" y="64" width="896" height="896" rx="196" fill="url(#tile)"/>
+    <rect x="65" y="65" width="894" height="894" rx="195" stroke="url(#rim)" stroke-width="2"/>
+  </g>
+  <g id="obooks-mark">
+    <circle cx="512" cy="512" r="274" stroke="url(#ring)" stroke-width="52"/>
+    <g id="open-book" transform="translate(112.64 38) scale(0.78)" filter="url(#book-shadow)">
+      <path d="M228 451C323 429 423 451 512 501C601 451 701 429 796 451V734C796 744 787 751 777 749C687 731 601 748 524 787C516 791 508 791 500 787C423 748 337 731 247 749C237 751 228 744 228 734V451Z" fill="#448FD8"/>
+      <path d="M244 444C332 424 426 444 504 489V764C420 719 336 701 244 719V444Z" fill="#B7C9DB"/>
+      <path d="M520 489C598 444 692 424 780 444V719C688 701 604 719 520 764V489Z" fill="#D2DEE9"/>
+      <path d="M252 426C343 409 428 429 500 472V742C427 699 342 680 252 697V426Z" fill="url(#left-page)"/>
+      <path d="M524 472C596 429 681 409 772 426V697C682 680 597 699 524 742V472Z" fill="url(#right-page)"/>
+      <path d="M500 472C508 477 516 477 524 472V742C516 747 508 747 500 742V472Z" fill="#9EAFBF"/>
+      <path d="M524 474V738" stroke="#FFFFFF" stroke-opacity="0.65" stroke-width="3"/>
+      <path d="M649 422C670 419 692 418 713 419V560C713 566 710 568 705 565L681 550L657 568C653 571 649 569 649 564V422Z" fill="url(#bookmark)"/>
+      <path d="M302 627C350 626 396 636 438 654" stroke="#A8B9C9" stroke-opacity="0.6" stroke-width="10" stroke-linecap="round"/>
+      <path d="M586 654C628 636 674 626 722 627" stroke="#B4C3D1" stroke-opacity="0.6" stroke-width="10" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>
