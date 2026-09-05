@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class ReaderTextSelectionTests: XCTestCase {
+    func testClickingBlankSpaceClearsDoubleColumnSelection() throws {
+        let fixture = Fixture(columns: 2)
+        defer { fixture.window.close() }
+        fixture.textView.setSelectedRange(NSRange(location: 2, length: 12))
+
+        let blankPoint = NSPoint(x: 560, y: 120)
+        fixture.textView.mouseDown(with: try fixture.event(.leftMouseDown, at: blankPoint))
+
+        XCTAssertEqual(fixture.textView.selectedRange().length, 0)
+    }
+
     func testMouseDragSelectsTextInEachPageColumn() throws {
         for columns in [2] {
             let fixture = Fixture(columns: columns)
@@ -46,6 +57,7 @@ final class ReaderTextSelectionTests: XCTestCase {
             scrollView.configure(flow: .paging(orientation: .horizontal, columns: columns == 1 ? .single : .double))
             textView.isEditable = false
             textView.isSelectable = true
+            textView.selectedTextAttributes = [.foregroundColor: NSColor.white]
             textView.isHorizontallyResizable = false
             textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             scrollView.documentView = textView

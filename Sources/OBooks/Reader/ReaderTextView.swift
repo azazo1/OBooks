@@ -231,7 +231,15 @@ final class ReaderTextView: NSTextView {
             super.mouseDown(with: event)
             return
         }
-        let location = characterLocation(for: event)
+        guard let location = selectableCharacterLocation(for: event) else {
+            let length = (string as NSString).length
+            let current = min(max(selectedRange().location, 0), length)
+            setSelectedRange(NSRange(location: current, length: 0))
+            selectionAnchorLocation = nil
+            isSelectingAcrossColumns = false
+            needsDisplay = true
+            return
+        }
         selectionAnchorLocation = location
         isSelectingAcrossColumns = true
         window?.makeFirstResponder(self)
@@ -464,8 +472,7 @@ final class ReaderTextView: NSTextView {
         guard selectedGlyphRange.length > 0 else { return }
         let intersection = NSIntersectionRange(glyphRange, selectedGlyphRange)
         guard intersection.length > 0 else { return }
-        let color = selectedTextAttributes[.backgroundColor] as? NSColor
-            ?? NSColor.selectedTextBackgroundColor
+        let color = NSColor.controlAccentColor.withAlphaComponent(0.28)
         color.setFill()
         layoutManager.enumerateLineFragments(forGlyphRange: intersection) {
             _, usedRect, container, lineGlyphRange, _ in
@@ -524,6 +531,23 @@ final class ReaderTextView: NSTextView {
         return layoutManager.characterIndexForGlyph(
             at: max(containerGlyphRange.location, glyphIndex)
         )
+    }
+
+    private func selectableCharacterLocation(for event: NSEvent) -> Int? {
+        guard let layoutManager else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let (textContainer, origin) = textContainerContext(at: point) else { return nil }
+        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let glyphRange = layoutManager.glyphRange(for: textContainer)
+        guard glyphRange.length > 0, glyphRange.location != NSNotFound else { return nil }
+        let glyphIndex = layoutManager.glyphIndex(for: containerPoint, in: textContainer)
+        guard glyphIndex >= glyphRange.location, glyphIndex < NSMaxRange(glyphRange) else { return nil }
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: NSRange(location: glyphIndex, length: 1),
+            in: textContainer
+        )
+        guard glyphRect.insetBy(dx: -1, dy: -1).contains(containerPoint) else { return nil }
+        return layoutManager.characterIndexForGlyph(at: glyphIndex)
     }
 
     private func characterBoundary(

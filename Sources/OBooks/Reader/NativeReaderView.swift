@@ -388,10 +388,12 @@ struct NativeReaderView: NSViewRepresentable {
                 let attributedText = loaded.document.attributedText
                 textView.backgroundColor = appearance.background
                 textView.insertionPointColor = appearance.accent
-                textView.selectedTextAttributes = [
-                    .backgroundColor: appearance.selection,
-                    .foregroundColor: appearance.foreground
-                ]
+                textView.selectedTextAttributes = settings.flow.isPaging
+                    ? [.foregroundColor: appearance.foreground]
+                    : [
+                        .backgroundColor: appearance.selection,
+                        .foregroundColor: appearance.foreground
+                    ]
                 textView.setReadingInsets(
                     horizontal: max(34, settings.margin),
                     vertical: max(64, settings.margin)
