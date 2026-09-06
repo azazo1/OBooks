@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -57,10 +58,10 @@ func validate(c Change, deviceID string) error {
 	if c.DeletedAt != nil && (*c.DeletedAt < 0 || *c.DeletedAt > float64(time.Now().Add(5*time.Minute).Unix())) { return ErrInvalid }
 	if c.DeletedAt != nil { return nil }
 	var payload map[string]json.RawMessage
-	if json.Unmarshal(c.Payload, &payload) != nil || payload[c.Entity] == nil { return ErrInvalid }
+	if json.Unmarshal(c.Payload, &payload) != nil || len(payload) != 1 || !validPayload(c.Entity, payload[c.Entity]) { return ErrInvalid }
 	if c.Entity == "annotation" || c.Entity == "bookmark" || c.Entity == "readingEvent" {
 		var item struct { ID string `json:"id"` }
-		if json.Unmarshal(payload[c.Entity], &item) != nil || item.ID != c.EntityID { return ErrInvalid }
+		if json.Unmarshal(payload[c.Entity], &item) != nil || !strings.EqualFold(item.ID, c.EntityID) { return ErrInvalid }
 	}
 	if c.Entity == "progress" {
 		var p struct { Fraction float64 `json:"fraction"` }
@@ -113,6 +114,7 @@ func (s *Service) Push(ctx context.Context, userID, deviceID string, changes []C
 		data, _ := json.Marshal(incoming)
 		digest := sha256.Sum256(data)
 		digestString := hex.EncodeToString(digest[:])
+		incoming.EntityID = strings.ToLower(incoming.EntityID)
 		var prior string
 		err = tx.QueryRowContext(ctx, "SELECT digest FROM accepted_changes WHERE user_id=? AND change_id=?", userID, incoming.ChangeID).Scan(&prior)
 		if err == nil {
