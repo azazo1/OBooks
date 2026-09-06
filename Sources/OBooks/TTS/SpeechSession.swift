@@ -9,6 +9,12 @@ enum SpeechPlaybackState: Equatable {
     var isPlaying: Bool { self == .playing || self == .preparing }
 }
 
+enum SpeechSleepOption: Equatable {
+    case off
+    case endOfChapter
+    case after(TimeInterval)
+}
+
 @MainActor
 final class SpeechPlaybackOwner {
     private weak var active: SpeechSession?
@@ -31,6 +37,8 @@ final class SpeechSession: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published var isExpanded = false
     @Published private(set) var isMinimized = false
+    @Published private(set) var sleepOption: SpeechSleepOption = .off
+    @Published private(set) var sleepDeadline: Date?
     var isPlayerVisible: Bool { state != .idle && !isMinimized }
     private(set) var position: SpeechPosition?
     var onPosition: ((SpeechPosition) -> Void)?
@@ -49,6 +57,7 @@ final class SpeechSession: ObservableObject {
     private var loadTask: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
+    private var sleepTask: Task<Void, Never>?
     private let startupTimeout: Duration
     private var revision = 0
     private var requestID: UUID?
@@ -124,6 +133,7 @@ final class SpeechSession: ObservableObject {
         if isExpanded { isExpanded = false }
         if isMinimized { isMinimized = false }
         if errorMessage != nil { errorMessage = nil }
+        clearSleepOption()
         setState(.idle)
         logger.info("停止朗读")
     }
@@ -137,6 +147,8 @@ final class SpeechSession: ObservableObject {
         startupTask?.cancel()
         loadTask = nil
         prefetchTask = nil
+        sleepTask?.cancel()
+        sleepTask = nil
         requestID = nil
         canResume = false
         engine.stop()
@@ -204,6 +216,68 @@ final class SpeechSession: ObservableObject {
         defaults.set(identifier, forKey: "reader.speech.voice.\(language ?? "default")")
         restartWithSettings()
         logger.info("切换朗读音色")
+    }
+
+    func setSleepOption(_ option: SpeechSleepOption) {
+        sleepTask?.cancel()
+        sleepTask = nil
+        sleepDeadline = nil
+        switch option {
+        case .off:
+            sleepOption = .off
+            logger.info("关闭朗读定时")
+        case .endOfChapter:
+            sleepOption = .endOfChapter
+            logger.info("朗读将在本章结束后停止")
+        case .after(let seconds):
+            guard seconds.isFinite, seconds > 0 else {
+                sleepOption = .off
+                return
+            }
+            sleepOption = .after(seconds)
+            sleepDeadline = Date().addingTimeInterval(seconds)
+            sleepTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                guard let self, self.sleepOption == .after(seconds) else { return }
+                self.fireSleepTimer()
+            }
+            logger.info("设置朗读定时: seconds=\(seconds)")
+        }
+    }
+
+    func sleepStatusText(at date: Date = Date()) -> String? {
+        switch sleepOption {
+        case .off:
+            return nil
+        case .endOfChapter:
+            return "本章结束"
+        case .after:
+            guard let sleepDeadline else { return nil }
+            return Self.countdownText(sleepDeadline.timeIntervalSince(date))
+        }
+    }
+
+    private static func countdownText(_ remaining: TimeInterval) -> String {
+        let total = max(0, Int(remaining.rounded(.up)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private func fireSleepTimer() {
+        sleepTask = nil
+        clearSleepOption()
+        logger.info("朗读定时结束")
+        if state.isPlaying { pause() }
+    }
+
+    private func clearSleepOption() {
+        if sleepOption != .off { sleepOption = .off }
+        if sleepDeadline != nil { sleepDeadline = nil }
     }
 
     private func restartWithSettings() {
@@ -346,6 +420,14 @@ final class SpeechSession: ObservableObject {
             guard state.isPlaying else { return }
             if sentenceIndex + 1 < sentences.count {
                 speakSentence(at: sentenceIndex + 1)
+            } else if sleepOption == .endOfChapter {
+                if sectionIndex + 1 < spineIDs.count {
+                    load(section: sectionIndex + 1, offset: 0, autoplay: false)
+                    logger.info("朗读已在本章结束")
+                } else {
+                    setState(.ended)
+                    logger.info("全书朗读完成")
+                }
             } else if sectionIndex + 1 < spineIDs.count {
                 load(section: sectionIndex + 1, offset: 0, autoplay: true)
             } else {

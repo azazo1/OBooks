@@ -13,6 +13,17 @@ struct SpeechPlayerOverlay: View {
     @GestureState private var translation = CGSize.zero
     @State private var draftRate = 1.0
     @State private var voices: [SpeechVoice] = []
+    private static let sleepPresets: [(seconds: TimeInterval, label: String)] = [
+        (60, "1 分钟"),
+        (300, "5 分钟"),
+        (600, "10 分钟"),
+        (900, "15 分钟"),
+        (1200, "20 分钟"),
+        (1800, "30 分钟"),
+        (2700, "45 分钟"),
+        (3600, "1 小时"),
+        (7200, "2 小时"),
+    ]
 
     var body: some View {
         GeometryReader { geometry in
@@ -63,7 +74,7 @@ struct SpeechPlayerOverlay: View {
                     cover
                     VStack(alignment: .leading, spacing: 4) {
                         Text(book.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                        Text(statusLabel).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        statusView(fontSize: 11)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -76,6 +87,7 @@ struct SpeechPlayerOverlay: View {
             playButton(size: 34)
             control("forward.end.fill", "下一句") { controller.send(.speechStep(1, paragraph: false)) }
                 .disabled(session.sentences.isEmpty)
+            sleepMenu(compact: true)
             control("minus", "最小化朗读播放器") { session.minimizePlayer() }
             control("stop.fill", "停止朗读") { controller.send(.stopSpeech) }
         }
@@ -89,7 +101,7 @@ struct SpeechPlayerOverlay: View {
                 cover
                 VStack(alignment: .leading, spacing: 4) {
                     Text(book.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    Text(statusLabel).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    statusView(fontSize: 12)
                 }
                 Spacer(minLength: 0)
                 control("chevron.down", "收起播放器") { session.isExpanded = false }
@@ -134,7 +146,11 @@ struct SpeechPlayerOverlay: View {
             }
             .disabled(session.sentences.isEmpty && session.state != .failed)
             Divider()
-            voiceMenu
+            HStack(spacing: 8) {
+                voiceMenu
+                sleepMenu(compact: false)
+                    .frame(width: 118, alignment: .leading)
+            }
             HStack(spacing: 10) {
                 Image(systemName: "speedometer").frame(width: 20)
                 Slider(value: $draftRate, in: 0.5...2, step: 0.05) { editing in
@@ -172,13 +188,91 @@ struct SpeechPlayerOverlay: View {
         .accessibilityLabel("朗读音色")
     }
 
+    private func sleepMenu(compact: Bool) -> some View {
+        Menu {
+            sleepItem("关闭", selected: session.sleepOption == .off) {
+                session.setSleepOption(.off)
+            }
+            sleepItem("本章结束", selected: session.sleepOption == .endOfChapter) {
+                session.setSleepOption(.endOfChapter)
+            }
+            Divider()
+            ForEach(Self.sleepPresets, id: \.seconds) { preset in
+                sleepItem(preset.label, selected: session.sleepOption == .after(preset.seconds)) {
+                    session.setSleepOption(.after(preset.seconds))
+                }
+            }
+        } label: {
+            if compact {
+                Image(systemName: session.sleepOption == .off ? "timer" : "timer.circle.fill")
+                    .font(.system(size: 12))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(session.sleepOption == .off ? .primary : Color.accentColor)
+            } else {
+                Label {
+                    sleepMenuTitle
+                } icon: {
+                    Image(systemName: "timer")
+                }
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(compact ? .hidden : .automatic)
+        .help("朗读定时结束")
+        .accessibilityLabel("朗读定时结束")
+        .accessibilityValue(session.sleepStatusText() ?? "关闭")
+    }
+
+    @ViewBuilder
+    private var sleepMenuTitle: some View {
+        if session.sleepDeadline != nil {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(session.sleepStatusText(at: context.date) ?? "定时结束")
+                    .monospacedDigit()
+            }
+        } else {
+            Text(session.sleepStatusText() ?? "定时结束")
+        }
+    }
+
+    private func sleepItem(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if selected { Label(title, systemImage: "checkmark") }
+            else { Text(title) }
+        }
+    }
+
     private var cover: some View {
         BookCoverImage(book: book, store: appModel.libraryStore)
             .frame(width: 34, height: 44)
             .accessibilityHidden(true)
     }
 
-    private var statusLabel: String {
+    private func statusView(fontSize: CGFloat) -> some View {
+        Group {
+            if session.sleepDeadline != nil {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(statusLabel(at: context.date))
+                }
+            } else {
+                Text(statusLabel(at: Date()))
+            }
+        }
+        .font(.system(size: fontSize))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+
+    private func statusLabel(at date: Date) -> String {
+        if let timer = session.sleepStatusText(at: date), session.state != .ended, session.state != .failed {
+            switch session.state {
+            case .paused: return "\(timer) - 已暂停"
+            default: return "\(timer) - \(session.chapterTitle)"
+            }
+        }
         switch session.state {
         case .ended: return "朗读完成"
         case .failed: return "朗读已中断"

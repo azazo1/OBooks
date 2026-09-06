@@ -189,6 +189,117 @@ final class SpeechSessionTests: XCTestCase {
         XCTAssertEqual(fixture.engine.calls.last?.text, "Recovered.")
     }
 
+    func testSleepTimerPausesPlaybackAndClearsOption() async throws {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.after(0.02))
+        XCTAssertEqual(fixture.session.sleepOption, .after(0.02))
+        XCTAssertNotNil(fixture.session.sleepDeadline)
+        for _ in 0..<100 where fixture.session.sleepOption != .off {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(fixture.session.sleepOption, .off)
+        XCTAssertNil(fixture.session.sleepDeadline)
+        XCTAssertEqual(fixture.session.state, .paused)
+    }
+
+    func testClearingSleepTimerKeepsPlaybackGoing() async throws {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.after(0.03))
+        fixture.session.setSleepOption(.off)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(fixture.session.state, .playing)
+        XCTAssertEqual(fixture.session.sleepOption, .off)
+    }
+
+    func testStopClearsArmedSleepTimer() async {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.endOfChapter)
+        XCTAssertEqual(fixture.session.sleepOption, .endOfChapter)
+        fixture.session.stop()
+        XCTAssertEqual(fixture.session.sleepOption, .off)
+        XCTAssertNil(fixture.session.sleepDeadline)
+    }
+
+    func testSleepTimerAndChapterEndReplaceEachOther() async {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.after(60))
+        XCTAssertEqual(fixture.session.sleepOption, .after(60))
+        XCTAssertNotNil(fixture.session.sleepDeadline)
+        fixture.session.setSleepOption(.endOfChapter)
+        XCTAssertEqual(fixture.session.sleepOption, .endOfChapter)
+        XCTAssertNil(fixture.session.sleepDeadline)
+        fixture.session.setSleepOption(.after(60))
+        XCTAssertEqual(fixture.session.sleepOption, .after(60))
+        XCTAssertNotNil(fixture.session.sleepDeadline)
+    }
+
+    func testChapterEndParksOnNextChapterPaused() async throws {
+        let fixture = Fixture(["First.", "Next."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.endOfChapter)
+        fixture.engine.finish()
+        for _ in 0..<100 where !(fixture.session.sectionIndex == 1 && fixture.session.state == .paused && !fixture.session.sentences.isEmpty) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(fixture.session.sectionIndex, 1)
+        XCTAssertEqual(fixture.session.state, .paused)
+        XCTAssertEqual(fixture.engine.calls.count, 1)
+        XCTAssertEqual(fixture.session.sleepOption, .endOfChapter)
+        fixture.session.resume()
+        await fixture.waitForSpeech(count: 2)
+        XCTAssertEqual(fixture.engine.calls.last?.text, "Next.")
+        XCTAssertEqual(fixture.session.state, .playing)
+    }
+
+    func testChapterEndDoesNotBlockUserSkip() async throws {
+        let fixture = Fixture(["First.", "Next."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.endOfChapter)
+        fixture.session.step(1)
+        await fixture.waitForSpeech(count: 2)
+        XCTAssertEqual(fixture.session.sectionIndex, 1)
+        XCTAssertEqual(fixture.session.state, .playing)
+        XCTAssertEqual(fixture.engine.calls.last?.text, "Next.")
+    }
+
+    func testChapterEndOnLastChapterEndsSession() async {
+        let fixture = Fixture(["Only."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.endOfChapter)
+        fixture.engine.finish()
+        XCTAssertEqual(fixture.session.state, .ended)
+    }
+
+    func testHaltPlaybackCancelsSleepTimerWithoutPausing() async throws {
+        let fixture = Fixture(["Hello world."])
+        defer { fixture.close() }
+        fixture.session.start(section: 0)
+        await fixture.waitForSpeech()
+        fixture.session.setSleepOption(.after(0.02))
+        fixture.session.haltPlayback()
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(fixture.session.state, .playing)
+        XCTAssertEqual(fixture.session.sleepOption, .after(0.02))
+    }
+
     func testUnavailableSpeechDoesNotLeavePlayerPreparingForever() async throws {
         let engine = FakeSpeechEngine()
         engine.startsAutomatically = false
