@@ -45,7 +45,6 @@ struct SyncSettingsView: View {
                 if sync.isSyncing { ProgressView().controlSize(.small) }
                 if sync.pendingCount > 0 { Text("待同步: \(sync.pendingCount)").foregroundStyle(.secondary) }
                 if let date = sync.lastSyncedAt { Text("最近同步: " + date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }
-                if let status = appModel.copyStatus { Text(status).foregroundStyle(.secondary) }
                 if let error = sync.lastError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             }
             .font(.callout)
@@ -93,18 +92,12 @@ struct SyncSettingsView: View {
                 }
             }
             if !appModel.localCopySources.isEmpty {
-                Divider()
-                Text("从本地书库复制")
-                    .font(.headline)
-                Text("复制到当前书库, 按书合并书签和高亮, 不删除来源.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ForEach(appModel.localCopySources) { profile in
-                    Button("复制 " + profile.title) {
-                        appModel.copyFromLocalProfile(profile)
-                    }
-                    .disabled(sync.isSyncing || appModel.copyStatus != nil)
+                LocalLibraryCopySection(
+                    sources: appModel.localCopySources,
+                    isBusy: sync.isSyncing || appModel.copyStatus != nil,
+                    status: appModel.copyStatus
+                ) { profile in
+                    appModel.copyFromLocalProfile(profile)
                 }
             }
         }

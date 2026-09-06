@@ -12,11 +12,17 @@ struct LibraryProfile: Codable, Identifiable, Equatable {
     var userID: String?
 
     var isUnbound: Bool { id == Self.unboundID }
-    var title: String {
+    var accountLabel: String {
         if isUnbound { return "未绑定书库" }
-        let user = username ?? "账号"
-        let host = server?.host ?? server?.absoluteString ?? "服务器"
-        return user + " @ " + host
+        return username ?? "账号"
+    }
+    var locationLabel: String {
+        if isUnbound { return "本机独立书库" }
+        return server?.host ?? server?.absoluteString ?? "服务器"
+    }
+    var title: String {
+        if isUnbound { return accountLabel }
+        return accountLabel + " @ " + locationLabel
     }
 }
 
