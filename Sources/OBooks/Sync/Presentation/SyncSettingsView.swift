@@ -109,7 +109,7 @@ struct SyncSettingsView: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 500)
+        .frame(width: 500)
         .onAppear { fillFromAccount() }
     }
 
