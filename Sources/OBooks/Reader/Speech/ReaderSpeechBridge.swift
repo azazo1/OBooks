@@ -18,6 +18,8 @@ final class ReaderSpeechBridge {
     init(session: SpeechSession) { self.session = session }
 
     func attach(textView: ReaderTextView, scrollView: ReaderScrollView) {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
         self.textView = textView
         self.scrollView = scrollView
         follow.onSuspend = { [weak scrollView] in scrollView?.interruptSpeechNavigation() }
@@ -41,6 +43,7 @@ final class ReaderSpeechBridge {
                 MainActor.assumeIsolated { self?.follow.setInteracting(active, source: "liveScroll") }
             })
         }
+        observePresentationChanges()
         session.onPosition = { [weak self] _ in self?.refresh(followPosition: true) }
         session.onStateChanged = { [weak self] state in
             guard let self else { return }
@@ -84,6 +87,35 @@ final class ReaderSpeechBridge {
     func revealCurrentPosition() {
         guard let position = session.position else { return }
         reveal?(position)
+    }
+
+    func handleWindowBecamePresentable() {
+        guard session.state.isPlaying, follow.isFollowing else { return }
+        guard let window = scrollView?.window else { return }
+        guard window.isVisible, !window.isMiniaturized, window.occlusionState.contains(.visible) else { return }
+        scrollView?.interruptSpeechNavigation()
+        revealCurrentPosition()
+    }
+
+    private func observePresentationChanges() {
+        let names: [Notification.Name] = [
+            NSApplication.didBecomeActiveNotification,
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didChangeOcclusionStateNotification,
+            NSWindow.didDeminiaturizeNotification,
+        ]
+        for name in names {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                MainActor.assumeIsolated { self?.handlePresentationNotification(notification) }
+            })
+        }
+    }
+
+    private func handlePresentationNotification(_ notification: Notification) {
+        if notification.name != NSApplication.didBecomeActiveNotification {
+            guard let window = notification.object as? NSWindow, window === scrollView?.window else { return }
+        }
+        handleWindowBecamePresentable()
     }
 
     func teardown() {

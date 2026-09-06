@@ -28,6 +28,12 @@ final class ReaderScrollView: NSScrollView {
 
     var isPageTransitionActive: Bool { preparingPage || transition != nil }
 
+    var canAnimateContentTransitions: Bool {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return false }
+        guard let window, window.isVisible, !window.isMiniaturized else { return false }
+        return window.occlusionState.contains(.visible)
+    }
+
     @MainActor
     private final class PageTransition {
         let oldView: NSImageView
@@ -246,7 +252,7 @@ final class ReaderScrollView: NSScrollView {
             target = (target / step).rounded() * step
             target = min(max(target, 0), maximum)
         }
-        guard animated, !pageFlow.isPaging, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+        guard animated, !pageFlow.isPaging, canAnimateContentTransitions else {
             stopSmoothScroll()
             setScrollOffset(target)
             return
@@ -257,13 +263,18 @@ final class ReaderScrollView: NSScrollView {
     }
 
     func interruptSpeechNavigation() {
-        if speechScroll { stopSmoothScroll() }
+        if speechScroll {
+            if let target = scrollTargetY {
+                setScrollOffset(target)
+            }
+            stopSmoothScroll()
+        }
         if let transition, transition.isSpeech { completeTransition(transition, commit: true) }
     }
 
     func transitionContent(direction: Int, update: @escaping () -> ReaderPageTurn?) {
         prepareForProgrammaticScroll()
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+        guard canAnimateContentTransitions else {
             _ = update()
             onPageTurnCompleted?()
             return
@@ -315,7 +326,7 @@ final class ReaderScrollView: NSScrollView {
 
     private func settle(_ transition: PageTransition, commit: Bool) {
         transition.settlement = commit
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if !canAnimateContentTransitions {
             completeTransition(transition, commit: commit)
             return
         }

@@ -1208,10 +1208,17 @@ struct NativeReaderView: NSViewRepresentable {
             return Int((offset / viewportHeight).rounded()) + 1
         }
 
+        private func prepareSpeechReveal(in scrollView: ReaderScrollView) -> Bool {
+            guard scrollView.isPageTransitionActive else { return true }
+            guard !scrollView.canAnimateContentTransitions else { return false }
+            scrollView.interruptSpeechNavigation()
+            return !scrollView.isPageTransitionActive
+        }
+
         private func revealSpeechPosition(_ position: SpeechPosition) {
             guard !isTornDown, !updatingDocument,
                   let scrollView = scrollView as? ReaderScrollView,
-                  !scrollView.isPageTransitionActive else { return }
+                  prepareSpeechReveal(in: scrollView) else { return }
             if let range = speechDocumentRange(position) {
                 revealLoadedSpeechRange(range)
                 return
@@ -1246,7 +1253,7 @@ struct NativeReaderView: NSViewRepresentable {
         private func revealLoadedSpeechRange(_ range: NSRange) {
             guard let textView, let scrollView = scrollView as? ReaderScrollView,
                   range.location < textView.string.utf16.count,
-                  !scrollView.isPageTransitionActive else { return }
+                  prepareSpeechReveal(in: scrollView) else { return }
             if let target = textView.pageOffset(forCharacter: range.location) {
                 let current = scrollView.contentView.bounds.minY
                 guard abs(target - current) > 1 else { return }

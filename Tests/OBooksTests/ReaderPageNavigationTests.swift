@@ -241,7 +241,7 @@ final class ReaderPageNavigationTests: XCTestCase {
             for _ in 0..<100 where engine.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
             XCTAssertEqual(session.state, .playing)
             XCTAssertFalse(reader.textView.allowsImagePreview)
-            XCTAssertTrue(reader.scrollView.isPageTransitionActive || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+            XCTAssertTrue(reader.scrollView.isPageTransitionActive || !reader.scrollView.canAnimateContentTransitions)
             reader.scrollView.prepareForProgrammaticScroll()
             try await Task.sleep(for: .milliseconds(30))
             XCTAssertEqual(reader.positions.last?.spineID, "chapter-1")
@@ -259,6 +259,28 @@ final class ReaderPageNavigationTests: XCTestCase {
             session.stop()
             XCTAssertTrue(reader.textView.allowsImagePreview)
         }
+    }
+
+    func testSpeechCatchUpWhenWindowBecomesPresentable() async throws {
+        let engine = FakeSpeechEngine()
+        let session = SpeechSession(engine: engine)
+        let reader = try Fixture(flow: .paging(orientation: .horizontal, columns: .single), speech: session)
+        defer { reader.close() }
+        reader.window.orderFrontRegardless()
+        session.start(section: 0)
+        for _ in 0..<100 where engine.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(session.state, .playing)
+        reader.scrollView.prepareForProgrammaticScroll()
+        reader.scrollView.scroll(to: 600, animated: false)
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 600)
+        reader.coordinator.speechBridge.handleWindowBecamePresentable()
+        reader.scrollView.prepareForProgrammaticScroll()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+
+        reader.scrollView.scroll(to: 600, animated: false)
+        reader.coordinator.speechBridge.follow.userInteraction()
+        reader.coordinator.speechBridge.handleWindowBecamePresentable()
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 600)
     }
 
     func testSpeechSurvivesReflowAndMapsPositionAfterPrepending() async throws {
