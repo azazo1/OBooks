@@ -3,8 +3,6 @@ import SwiftUI
 struct SyncSettingsView: View {
     @ObservedObject var appModel: AppModel
     @ObservedObject var sync: SyncCoordinator
-    @State private var server = ""
-    @State private var username = ""
     @State private var password = ""
     @State private var confirmingDelete = false
 
@@ -57,12 +55,16 @@ struct SyncSettingsView: View {
                         onRemove: removeAction
                     )
                 }
-                currentAccountForm
-                if let profile = appModel.workspace?.activeProfile {
-                    Text(profile.isUnbound ? "当前是未绑定书库, 登录其他账号会新建空书库, 不会带走这里的书." : "当前书库: " + profile.title)
+                if let profile = appModel.workspace?.activeProfile, profile.isUnbound {
+                    Text("当前是未绑定书库, 用添加账号登录云端, 不会带走这里的书.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if bound, !sync.isSignedIn {
+                    Form {
+                        SecureField("密码", text: $password)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 8) {
                     Label(sync.status, systemImage: sync.lastError == nil ? "arrow.triangle.2.circlepath" : "exclamationmark.icloud")
@@ -88,10 +90,6 @@ struct SyncSettingsView: View {
             .frame(maxWidth: 520, alignment: .leading)
         }
         .frame(minWidth: 500, idealWidth: 520, maxHeight: 680)
-        .onAppear { fillFromAccount() }
-        .onChange(of: appModel.workspace?.activeID ?? "") { _, _ in
-            fillFromAccount()
-        }
         .background(SettingsWindowProbe())
         .sheet(isPresented: accountFormPresented) {
             AccountFormView(appModel: appModel)
@@ -105,26 +103,12 @@ struct SyncSettingsView: View {
                 guard let profile = removableProfile else { return }
                 Task {
                     await appModel.removeLocalAccount(profile)
-                    fillFromAccount()
+                    password = ""
                 }
             }
             Button("取消", role: .cancel) {}
         } message: {
             Text("将从这台电脑删除 " + (removableProfile?.title ?? "该账号") + " 的书库和登录状态, 云端账号不会删除.")
-        }
-    }
-
-    private var currentAccountForm: some View {
-        Form {
-            TextField("服务地址", text: $server, prompt: Text("https://books.example.com"))
-                .disabled(bound || busy)
-            TextField("用户名", text: $username)
-                .disabled(bound || busy)
-            TextField("设备名称", text: $sync.deviceName)
-                .disabled(sync.isSignedIn || busy)
-            if !sync.isSignedIn {
-                SecureField("密码", text: $password)
-            }
         }
     }
 
@@ -140,17 +124,17 @@ struct SyncSettingsView: View {
                 Button("退出登录") {
                     Task {
                         await sync.logout()
-                        fillFromAccount()
+                        password = ""
                     }
                 }
                 .disabled(busy)
-            } else {
+            } else if bound {
                 Spacer()
                 Button("登录") {
                     submitLogin()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(server.isEmpty || username.isEmpty || password.isEmpty || busy)
+                .disabled(password.isEmpty || busy)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -172,25 +156,18 @@ struct SyncSettingsView: View {
     private func switchToProfile(_ profile: LibraryProfile) {
         password = ""
         appModel.switchToProfile(profile.id)
-        fillFromAccount()
     }
 
     private func submitLogin() {
+        guard let account = sync.account else { return }
         let secret = password
         password = ""
         Task {
-            let signedIn = await appModel.loginToAccount(
-                server: server,
-                username: username,
-                password: secret,
-                deviceName: sync.deviceName
+            _ = await appModel.loginToAccount(
+                server: account.server.absoluteString,
+                username: account.username,
+                password: secret
             )
-            if signedIn { fillFromAccount() }
         }
-    }
-
-    private func fillFromAccount() {
-        server = sync.account?.server.absoluteString ?? ""
-        username = sync.account?.username ?? ""
     }
 }
