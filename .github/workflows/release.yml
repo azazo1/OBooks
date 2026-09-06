@@ -168,7 +168,7 @@ jobs:
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: OBooks-${{ matrix.arch }}
+          name: OBooks-${{ needs.version.outputs.build_version }}-macos-${{ matrix.arch }}
           path: dist/OBooks-${{ needs.version.outputs.build_version }}-macos-${{ matrix.arch }}.dmg
           if-no-files-found: error
           retention-days: 14
