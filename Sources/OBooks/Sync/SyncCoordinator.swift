@@ -109,15 +109,24 @@ final class SyncCoordinator: ObservableObject {
     }
 
     func logout() async {
-        guard !isSyncing, downloading.isEmpty, let api else { return }
-        do {
-            try await api.logout()
-            scheduled?.cancel()
-            self.api = nil
-            isSignedIn = false
-            status = "未登录"
-            lastError = nil
-        } catch { report(error) }
+        scheduled?.cancel()
+        scheduled = nil
+        if let api {
+            do {
+                try await api.logout()
+            } catch {
+                logger.error("未能撤销服务端会话: \(error.localizedDescription, privacy: .public)")
+                try? credentials.remove()
+            }
+        } else {
+            try? credentials.remove()
+        }
+        api = nil
+        isSignedIn = false
+        isSyncing = false
+        transferProgress = nil
+        status = "未登录"
+        lastError = nil
     }
 
     func localDataChanged() {
@@ -162,7 +171,7 @@ final class SyncCoordinator: ObservableObject {
             try await pullAll(api)
             try applyRemote()
             var batches = 0
-            while !journal.pending.isEmpty {
+            while isSignedIn, !journal.pending.isEmpty {
                 let batch = journal.batch()
                 journal.attemptedIDs.formUnion(batch.map(\.changeID))
                 try persist()
@@ -181,11 +190,13 @@ final class SyncCoordinator: ObservableObject {
             try await downloadCovers(api, model: model)
             journal.lastSyncedAt = Date()
             try persist()
+            guard isSignedIn else { return }
             retryDelay = 2
             status = "已同步"
             logger.info("同步完成: pending=\(self.journal.pending.count), seconds=\(Date().timeIntervalSince(started))")
             schedule(delay: journal.pending.isEmpty ? 60 : 1)
         } catch {
+            guard isSignedIn else { return }
             report(error)
             if case CloudSyncError.unauthorized = error { isSignedIn = false }
             else { schedule(delay: retryDelay); retryDelay = min(retryDelay * 2, 60) }

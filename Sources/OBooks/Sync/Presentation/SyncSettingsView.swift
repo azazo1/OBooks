@@ -36,7 +36,9 @@ struct SyncSettingsView: View {
             HStack {
                 if sync.isSignedIn {
                     Button { Task { await sync.synchronize() } } label: { Label("立即同步", systemImage: "arrow.triangle.2.circlepath") }
+                        .disabled(sync.isSyncing || !sync.downloading.isEmpty)
                     Button { Task { await sync.downloadAll() } } label: { Label("下载全部", systemImage: "icloud.and.arrow.down") }
+                        .disabled(sync.isSyncing || !sync.downloading.isEmpty)
                     Spacer()
                     Button("退出登录") { Task { await sync.logout() } }
                 } else {
@@ -47,11 +49,10 @@ struct SyncSettingsView: View {
                         Task { await sync.login(server: server, username: username, password: secret) }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(server.isEmpty || username.isEmpty || password.isEmpty)
+                    .disabled(server.isEmpty || username.isEmpty || password.isEmpty || sync.isSyncing)
                     .keyboardShortcut(.defaultAction)
                 }
             }
-            .disabled(sync.isSyncing || !sync.downloading.isEmpty)
         }
         .padding(24)
         .frame(width: 500)
