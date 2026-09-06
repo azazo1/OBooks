@@ -5,11 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"obooks/server/internal/auth"
@@ -22,14 +20,21 @@ type API struct {
 	Sync *syncservice.Service
 	Files *library.Store
 	Logger *slog.Logger
-	loginMu sync.Mutex
-	loginAttempts map[string][]time.Time
+	logins *attemptLimiter
+	errors *attemptLimiter
 	loginSlots chan struct{}
 }
 
 func (a *API) Handler() http.Handler {
-	a.loginAttempts = map[string][]time.Time{}
-	a.loginSlots = make(chan struct{}, 2)
+	if a.logins == nil {
+		a.logins = newAttemptLimiter(limiterWindow, loginLimit, limiterMaxKeys)
+	}
+	if a.errors == nil {
+		a.errors = newAttemptLimiter(limiterWindow, errorLimit, limiterMaxKeys)
+	}
+	if a.loginSlots == nil {
+		a.loginSlots = make(chan struct{}, loginConcurrency)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { respond(w, http.StatusOK, map[string]string{"status":"ok"}) })
 	mux.HandleFunc("POST /v1/auth/login", a.login)
@@ -43,11 +48,54 @@ func (a *API) Handler() http.Handler {
 		mux.HandleFunc("HEAD /v1/books/{bookID}/"+kind, a.authorized(a.getFile(kind)))
 		mux.HandleFunc("PUT /v1/books/{bookID}/"+kind, a.authorized(a.putFile(kind)))
 	}
+	return a.protect(mux)
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (a *API) protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		started := time.Now()
-		mux.ServeHTTP(w, r)
+		ip := clientIP(r)
+		if r.URL.Path != "/healthz" && a.errors.blocked(ip) {
+			limited(w, "请求过于频繁")
+			a.Logger.Debug("请求完成", "method", r.Method, "path", r.URL.Path, "status", http.StatusTooManyRequests, "duration", time.Since(started))
+			return
+		}
+		recorder := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(recorder, r)
+		if r.URL.Path != "/healthz" && isClientError(recorder.status) {
+			if recorded, reached := a.errors.charge(ip); recorded && reached {
+				a.Logger.Warn("错误请求过多, 开始限流", "ip", ip, "path", r.URL.Path, "status", recorder.status)
+			}
+		}
 		a.Logger.Debug("请求完成", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started))
 	})
 }
@@ -60,6 +108,11 @@ func respond(w http.ResponseWriter, status int, value any) {
 
 func fail(w http.ResponseWriter, status int, code, message string) {
 	respond(w, status, map[string]any{"error":map[string]string{"code":code, "message":message}})
+}
+
+func limited(w http.ResponseWriter, message string) {
+	w.Header().Set("Retry-After", strconv.Itoa(int(limiterWindow.Seconds())))
+	fail(w, http.StatusTooManyRequests, "rate_limited", message)
 }
 
 func decode(w http.ResponseWriter, r *http.Request, value any, limit int64) bool {
@@ -86,21 +139,13 @@ func (a *API) authorized(next func(http.ResponseWriter, *http.Request, auth.Iden
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	a.loginMu.Lock()
-	now := time.Now()
-	for key, entries := range a.loginAttempts {
-		live := entries[:0]
-		for _, at := range entries { if now.Sub(at) < time.Minute { live = append(live, at) } }
-		if len(live) == 0 { delete(a.loginAttempts, key) } else { a.loginAttempts[key] = live }
+	if recorded, _ := a.logins.charge(clientIP(r)); !recorded {
+		limited(w, "登录请求过于频繁")
+		return
 	}
-	limited := len(a.loginAttempts[ip]) >= 10 || len(a.loginAttempts) >= 10000
-	if !limited { a.loginAttempts[ip] = append(a.loginAttempts[ip], now) }
-	a.loginMu.Unlock()
-	if limited { fail(w, 429, "rate_limited", "登录请求过于频繁"); return }
 	select {
 	case a.loginSlots <- struct{}{}: defer func() { <-a.loginSlots }()
-	default: fail(w, 429, "rate_limited", "登录服务繁忙"); return
+	default: limited(w, "登录服务繁忙"); return
 	}
 	var body struct { Username string `json:"username"`; Password string `json:"password"`; DeviceID string `json:"deviceID"`; DeviceName string `json:"deviceName"` }
 	if !decode(w, r, &body, 8<<10) { return }

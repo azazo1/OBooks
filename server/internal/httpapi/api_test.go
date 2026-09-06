@@ -251,6 +251,31 @@ func TestSwiftClientIntegration(t *testing.T) {
 	t.Log(string(output))
 }
 
+func TestClientErrorRateLimit(t *testing.T) {
+	f := setup(t)
+	now := time.Now()
+	f.api.errors.perKey = 3
+	f.api.errors.now = func() time.Time { return now }
+	for i := 0; i < 3; i++ {
+		if f.call("GET", "/missing", "", nil).Code != 404 {
+			t.Fatal("错误请求未返回客户端错误")
+		}
+	}
+	if f.call("GET", "/missing", "", nil).Code != 429 {
+		t.Fatal("错误请求未触发限流")
+	}
+	if f.call("GET", "/v1/sync/pull?cursor=0", f.tokens.AccessToken, nil).Code != 429 {
+		t.Fatal("限流未覆盖后续合法请求")
+	}
+	if f.call("GET", "/healthz", "", nil).Code != 200 {
+		t.Fatal("健康检查被限流")
+	}
+	now = now.Add(time.Minute)
+	if f.call("GET", "/v1/sync/pull?cursor=0", f.tokens.AccessToken, nil).Code != 200 {
+		t.Fatal("窗口结束后仍限流")
+	}
+}
+
 func TestGarbageCollectionRequiresEveryDeviceAcknowledgement(t *testing.T) {
 	f := setup(t)
 	_, err := f.api.Auth.Login(context.Background(), "alice", "a-long-test-password", "offline-device", "B")

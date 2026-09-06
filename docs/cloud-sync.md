@@ -22,7 +22,7 @@ just server-run
 just server-run --settings settings.json
 ```
 
-生产环境可由反向代理终止 TLS, 将流量转发到回环监听地址. 如必须在容器中监听非回环 HTTP 地址, 使用 `--allow-http`, 并仅向可信的 TLS 代理开放该端口. 代理需要允许 512 MiB 的 EPUB 请求和较长的上传时间. 也可直接配置 `tlsCertificate` 与 `tlsKey` 启用 HTTPS. `/healthz` 提供进程健康检查.
+生产环境可由反向代理终止 TLS, 将流量转发到回环监听地址. 如必须在容器中监听非回环 HTTP 地址, 使用 `--allow-http`, 并仅向可信的 TLS 代理开放该端口. 代理需要允许 512 MiB 的 EPUB 请求和较长的上传时间. 也可直接配置 `tlsCertificate` 与 `tlsKey` 启用 HTTPS. `/healthz` 提供进程健康检查, 不受错误请求限流影响. 同一来源在 1 分钟内累计 20 次 4xx 响应后会被临时拒绝; 登录还单独限制每分钟次数和并发, 用于抑制扫描和口令尝试.
 
 服务以单实例运行, 元数据保存在 SQLite WAL 数据库中, 书籍文件保存在 `objects/` 内. 使用专用操作系统用户启动服务, 持久化整个数据目录. 服务端能读取书籍和标注内容.
 
