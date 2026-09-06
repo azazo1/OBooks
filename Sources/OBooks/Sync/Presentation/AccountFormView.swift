@@ -75,7 +75,10 @@ struct AccountFormView: View {
             }
         }
         .padding(24)
-        .frame(width: 440)
+        .frame(width: 440, alignment: .leading)
+        .animation(.easeInOut(duration: 0.22), value: appModel.accountActionError)
+        .animation(.easeInOut(duration: 0.22), value: passwordError)
+        .tracksWindowContentHeight()
         .onAppear(perform: fill)
         .onChange(of: appModel.accountForm) { _, _ in fill() }
     }

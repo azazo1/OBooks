@@ -29,6 +29,29 @@ enum AppWindowConfiguration {
         window.level = .floating
         window.animationBehavior = .utilityWindow
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.styleMask.remove(.resizable)
+    }
+
+    /// 保持窗口顶边不动, 只改内容高度.
+    static func windowFrame(keepingTopOf window: NSWindow, contentHeight: CGFloat) -> NSRect {
+        let content = window.contentRect(forFrameRect: window.frame)
+        let height = max(1, contentHeight.rounded(.up))
+        let newContent = NSRect(x: content.origin.x, y: content.maxY - height, width: content.width, height: height)
+        return window.frameRect(forContentRect: newContent)
+    }
+
+    static func setContentHeight(_ height: CGFloat, in window: NSWindow, animated: Bool) {
+        let frame = windowFrame(keepingTopOf: window, contentHeight: height)
+        guard abs(frame.height - window.frame.height) > 0.5 else { return }
+        if animated, window.isVisible {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.allowsImplicitAnimation = true
+                window.animator().setFrame(frame, display: true)
+            }
+        } else {
+            window.setFrame(frame, display: true)
+        }
     }
 
     static func visibleSettingsWindow() -> NSWindow? {

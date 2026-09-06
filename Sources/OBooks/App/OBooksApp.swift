@@ -51,5 +51,6 @@ struct OBooksApp: App {
         Settings {
             SyncSettingsView(appModel: appModel)
         }
+        .windowResizability(.contentSize)
     }
 }

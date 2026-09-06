@@ -38,6 +38,20 @@ final class AppWindowConfigurationTests: XCTestCase {
         XCTAssertEqual(window.level, .floating)
         XCTAssertFalse(window.collectionBehavior.contains(.primary))
         XCTAssertTrue(AppWindowConfiguration.belongsToSettingsSession(window))
+        XCTAssertFalse(window.styleMask.contains(.resizable))
+    }
+
+    func testContentHeightChangeKeepsWindowTopEdge() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 80, width: 400, height: 300),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: true
+        )
+        let top = window.frame.maxY
+        let next = AppWindowConfiguration.windowFrame(keepingTopOf: window, contentHeight: 180)
+        XCTAssertEqual(next.maxY, top, accuracy: 0.5)
+        XCTAssertEqual(window.contentRect(forFrameRect: next).height, 180, accuracy: 0.5)
     }
 
     func testReaderWindowBackgroundFollowsAppearance() {

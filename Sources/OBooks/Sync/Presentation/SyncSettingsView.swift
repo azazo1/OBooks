@@ -37,8 +37,7 @@ struct SyncSettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 10) {
                     Image(systemName: "icloud").font(.title2)
                     Text("云同步").font(.title2.weight(.semibold))
@@ -87,10 +86,13 @@ struct SyncSettingsView: View {
                 }
             }
             .padding(24)
-            .frame(maxWidth: 520, alignment: .leading)
-        }
-        .frame(minWidth: 500, idealWidth: 520, maxHeight: 680)
-        .background(SettingsWindowProbe())
+            .frame(width: 520, alignment: .leading)
+            .animation(.easeInOut(duration: 0.22), value: sync.isSignedIn)
+            .animation(.easeInOut(duration: 0.22), value: bound)
+            .animation(.easeInOut(duration: 0.22), value: settingsError)
+            .animation(.easeInOut(duration: 0.22), value: appModel.localCopySources.count)
+            .tracksWindowContentHeight()
+            .background(SettingsWindowProbe())
         .sheet(isPresented: accountFormPresented) {
             AccountFormView(appModel: appModel)
         }
