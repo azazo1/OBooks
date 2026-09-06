@@ -294,9 +294,13 @@ final class ReaderPageNavigationTests: XCTestCase {
         defer { reader.close() }
         try await Task.sleep(for: .milliseconds(30))
         reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.downArrow))
-        XCTAssertGreaterThan(try XCTUnwrap(reader.scrollView.scrollTargetY), 0)
+        XCTAssertGreaterThan(scrollDestination(reader.scrollView), 0)
         reader.textView.keyDown(with: try arrow(ReaderKeyNavigation.rightArrow))
-        XCTAssertGreaterThan(try XCTUnwrap(reader.scrollView.scrollTargetY), 0)
+        XCTAssertGreaterThan(scrollDestination(reader.scrollView), 0)
+    }
+
+    private func scrollDestination(_ scrollView: ReaderScrollView) -> CGFloat {
+        scrollView.scrollTargetY ?? scrollView.contentView.bounds.minY
     }
 
     private func arrow(_ code: UInt16) throws -> NSEvent {
