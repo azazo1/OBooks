@@ -4,7 +4,7 @@ OBooks 使用自部署 Go 服务同步书库, 阅读进度, 书签, 高亮, 笔�
 
 ## 部署
 
-服务端需要 Go 1.26 或更高版本. 在项目根目录执行:
+服务端需要 Go 1.26 或更高版本. GitHub Release 提供各平台预编译的 `obooks-server` 归档. 本地构建在项目根目录执行:
 
 ```shell
 just server-build

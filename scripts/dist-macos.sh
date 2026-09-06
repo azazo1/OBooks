@@ -8,44 +8,8 @@ fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
-
-# 生成给界面展示的版本号, 遵循版本显示约定:
-# - 干净且恰好落在版本 tag 上: 直接显示该 tag, 如 v1.2.3.
-# - 干净但处于非 tag commit: 最近 tag 后加 "-" 和 7 位短 hash, 如 v1.2.3-a1b2c3d.
-# - HEAD 工作区有未提交改动: 改用 "^" 分隔, 如 v1.2.3^a1b2c3d.
-# 基础版本样式跟随最近一个版本 tag.
-compute_display_version() {
-    local dirty=false
-    # 用 porcelain 同时覆盖已跟踪文件的修改, 暂存区改动和未跟踪文件.
-    if [[ -n "$(git status --porcelain)" ]]; then
-        dirty=true
-    fi
-    local exact_tag last_tag short_sha
-    exact_tag="$(git describe --tags --match 'v[0-9]*' --exact-match 2>/dev/null || true)"
-    short_sha="$(git rev-parse --short=7 HEAD)"
-    if [[ -n "$exact_tag" ]]; then
-        if [[ "$dirty" == true ]]; then
-            printf '%s^%s\n' "$exact_tag" "$short_sha"
-        else
-            printf '%s\n' "$exact_tag"
-        fi
-        return
-    fi
-    last_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)"
-    if [[ -n "$last_tag" ]]; then
-        if [[ "$dirty" == true ]]; then
-            printf '%s^%s\n' "$last_tag" "$short_sha"
-        else
-            printf '%s-%s\n' "$last_tag" "$short_sha"
-        fi
-    else
-        if [[ "$dirty" == true ]]; then
-            printf 'v0.0.0^%s\n' "$short_sha"
-        else
-            printf 'v0.0.0-%s\n' "$short_sha"
-        fi
-    fi
-}
+# shellcheck source=scripts/display-version.sh
+source "$project_root/scripts/display-version.sh"
 
 machine="$(uname -m)"
 case "$machine" in
@@ -76,22 +40,7 @@ case "$arch" in
         ;;
 esac
 
-if [[ -n "${VERSION:-}" ]]; then
-    version="$VERSION"
-else
-    exact_tag="$(git describe --tags --match 'v[0-9]*' --exact-match 2>/dev/null || true)"
-    if [[ -n "$exact_tag" ]]; then
-        version="${exact_tag#v}"
-    else
-        last_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0 2>/dev/null || true)"
-        short_sha="$(git rev-parse --short=7 HEAD)"
-        if [[ -n "$last_tag" ]]; then
-            version="${last_tag#v}-$short_sha"
-        else
-            version="0.0.0-$short_sha"
-        fi
-    fi
-fi
+version="${VERSION:-$(compute_build_version)}"
 
 if [[ -z "$version" || "$version" == */* ]]; then
     echo "无效的构建版本: $version" >&2

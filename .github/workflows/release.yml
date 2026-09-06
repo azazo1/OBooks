@@ -207,6 +207,99 @@ jobs:
           set -euo pipefail
           swift test
 
+  server-test:
+    name: 测试服务端
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 检出目标提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: 运行服务端测试
+        working-directory: server
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+
+  server:
+    name: 构建服务端 (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: version
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            arch: x86_64
+            goos: linux
+            goarch: amd64
+            ext: tar.gz
+          - platform: linux
+            arch: aarch64
+            goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - platform: windows
+            arch: x86_64
+            goos: windows
+            goarch: amd64
+            ext: zip
+          - platform: windows
+            arch: aarch64
+            goos: windows
+            goarch: arm64
+            ext: zip
+          - platform: macos
+            arch: x86_64
+            goos: darwin
+            goarch: amd64
+            ext: tar.gz
+          - platform: macos
+            arch: aarch64
+            goos: darwin
+            goarch: arm64
+            ext: tar.gz
+    steps:
+      - name: 检出目标提交
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.source_ref }}
+          fetch-depth: 0
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: 构建并打包服务端
+        env:
+          VERSION: ${{ needs.version.outputs.build_version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: ./scripts/dist-server.sh
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: obooks-server-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/obooks-server-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 14
+
   release:
     name: 创建 GitHub Release
     if: needs.version.outputs.is_release == 'true'
@@ -214,6 +307,8 @@ jobs:
       - version
       - build
       - test
+      - server-test
+      - server
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -269,7 +364,6 @@ jobs:
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
-          pattern: OBooks-*
           path: release-artifacts
           merge-multiple: true
 
@@ -278,13 +372,18 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          archives=(release-artifacts/OBooks-*.dmg)
-          if (( ${#archives[@]} != 2 )); then
-            echo "预期 2 个 DMG, 实际找到 ${#archives[@]} 个" >&2
+          archives=(
+            release-artifacts/OBooks-*.dmg
+            release-artifacts/obooks-server-*.tar.gz
+            release-artifacts/obooks-server-*.zip
+          )
+          if (( ${#archives[@]} != 8 )); then
+            echo "预期 8 个归档, 实际找到 ${#archives[@]} 个" >&2
+            printf '%s\n' "${archives[@]}" >&2
             exit 1
           fi
 
-          (cd release-artifacts && sha256sum OBooks-*.dmg > SHA256SUMS)
+          (cd release-artifacts && sha256sum OBooks-*.dmg obooks-server-*.tar.gz obooks-server-*.zip > SHA256SUMS)
 
       - name: 生成 release notes
         env:
@@ -329,10 +428,13 @@ jobs:
           shopt -s nullglob
           assets=(
             release-artifacts/OBooks-*.dmg
+            release-artifacts/obooks-server-*.tar.gz
+            release-artifacts/obooks-server-*.zip
             release-artifacts/SHA256SUMS
           )
-          if (( ${#assets[@]} != 3 )); then
-            echo "预期 3 个发布文件, 实际找到 ${#assets[@]} 个" >&2
+          if (( ${#assets[@]} != 9 )); then
+            echo "预期 9 个发布文件, 实际找到 ${#assets[@]} 个" >&2
+            printf '%s\n' "${assets[@]}" >&2
             exit 1
           fi
 

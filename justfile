@@ -23,15 +23,27 @@ run:
 clean:
     swift package clean
 
-# just dist
-# 根据当前平台生成 macOS 发布产物.
+server_ldflags := "-X main.version=" + trim(`./scripts/display-version.sh`)
+
+# 根据当前平台生成发布产物.
 [macos]
 dist:
     ./scripts/dist-macos.sh
+    ./scripts/dist-server.sh
+
+# 根据当前平台生成发布产物.
+[linux]
+dist:
+    ./scripts/dist-server.sh
+
+# 根据当前平台生成发布产物.
+[windows]
+dist:
+    powershell -NoProfile -File scripts/dist-server.ps1
 
 # 构建 Go 同步服务端.
 server-build:
-    cd server && go build ./cmd/obooks-server
+    cd server && go build -ldflags "{{server_ldflags}}" ./cmd/obooks-server
 
 # 测试 Go 同步服务端.
 server-test:
@@ -40,12 +52,12 @@ server-test:
 # just server-run --settings settings.example.json
 # 启动 Go 同步服务端.
 server-run *args:
-    cd server && go run ./cmd/obooks-server serve {{args}}
+    cd server && go run -ldflags "{{server_ldflags}}" ./cmd/obooks-server serve {{args}}
 
 # just server-admin user-create --username reader
 # 管理同步服务账号.
 server-admin +args:
-    cd server && go run ./cmd/obooks-server {{args}}
+    cd server && go run -ldflags "{{server_ldflags}}" ./cmd/obooks-server {{args}}
 
 # 使用临时服务验证两个 Swift 客户端的完整同步流程.
 sync-integration:

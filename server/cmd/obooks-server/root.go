@@ -15,6 +15,9 @@ import (
 	"obooks/server/internal/storage"
 )
 
+// version 由构建脚本根据 git 状态通过 ldflags 注入.
+var version string
+
 type rootOptions struct {
 	settingsFile  string
 	dataDirectory string
@@ -25,9 +28,11 @@ func newRoot(logger *slog.Logger) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "obooks-server",
 		Short:         "OBooks 云同步服务",
+		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	cmd.SetVersionTemplate("{{.Version}}\n")
 	cmd.CompletionOptions.DisableDefaultCmd = true
 	flags := cmd.PersistentFlags()
 	flags.StringVarP(&opts.settingsFile, "settings", "s", "", "服务端 JSON 配置文件")
