@@ -87,10 +87,6 @@ struct SyncSettingsView: View {
             }
             .padding(24)
             .frame(width: 520, alignment: .leading)
-            .animation(.easeInOut(duration: 0.22), value: sync.isSignedIn)
-            .animation(.easeInOut(duration: 0.22), value: bound)
-            .animation(.easeInOut(duration: 0.22), value: settingsError)
-            .animation(.easeInOut(duration: 0.22), value: appModel.localCopySources.count)
             .tracksWindowContentHeight()
             .background(SettingsWindowProbe())
         .sheet(isPresented: accountFormPresented) {

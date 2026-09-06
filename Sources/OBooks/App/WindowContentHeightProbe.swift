@@ -8,13 +8,9 @@ struct ViewHeightPreference: PreferenceKey {
     }
 }
 
-/// 把宿主窗口高度跟到 SwiftUI 内容高度, 变化时顶边不动并做动画.
+/// 把宿主窗口高度跟到 SwiftUI 内容高度, 变化时顶边不动.
 struct WindowContentHeightProbe: NSViewRepresentable {
     var height: CGFloat
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
 
     func makeNSView(context: Context) -> NSView {
         NSView()
@@ -22,13 +18,7 @@ struct WindowContentHeightProbe: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard height > 1, let window = nsView.window else { return }
-        let animated = context.coordinator.lastHeight > 1
-        AppWindowConfiguration.setContentHeight(height, in: window, animated: animated)
-        context.coordinator.lastHeight = height
-    }
-
-    final class Coordinator {
-        var lastHeight: CGFloat = 0
+        AppWindowConfiguration.setContentHeight(height, in: window)
     }
 }
 

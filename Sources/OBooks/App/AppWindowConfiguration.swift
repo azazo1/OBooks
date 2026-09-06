@@ -40,18 +40,10 @@ enum AppWindowConfiguration {
         return window.frameRect(forContentRect: newContent)
     }
 
-    static func setContentHeight(_ height: CGFloat, in window: NSWindow, animated: Bool) {
+    static func setContentHeight(_ height: CGFloat, in window: NSWindow) {
         let frame = windowFrame(keepingTopOf: window, contentHeight: height)
         guard abs(frame.height - window.frame.height) > 0.5 else { return }
-        if animated, window.isVisible {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                context.allowsImplicitAnimation = true
-                window.animator().setFrame(frame, display: true)
-            }
-        } else {
-            window.setFrame(frame, display: true)
-        }
+        window.setFrame(frame, display: true)
     }
 
     static func visibleSettingsWindow() -> NSWindow? {
