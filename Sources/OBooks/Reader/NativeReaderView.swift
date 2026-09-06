@@ -51,6 +51,9 @@ struct NativeReaderView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets()
 
         let textView = ReaderTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
         textView.wantsLayer = true
@@ -298,6 +301,7 @@ struct NativeReaderView: NSViewRepresentable {
                         )
                     }
                     self.updatingDocument = false
+                    self.alignPagingViewportIfNeeded()
                     self.speechBridge.refresh()
                     self.reportProgress()
                 }
@@ -350,6 +354,7 @@ struct NativeReaderView: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.alignPagingViewportIfNeeded()
                     self?.reportProgress()
                 }
             }
@@ -580,7 +585,7 @@ struct NativeReaderView: NSViewRepresentable {
                 textView.textStorage?.setAttributedString(attributedText)
                 textView.configurePageColumns(
                     settings.flow.isPaging ? settings.flow.pageColumns.rawValue : 0,
-                    viewportHeight: scrollView.contentSize.height
+                    viewportHeight: currentViewportHeight()
                 )
                 scrollView.backgroundColor = appearance.background
                 currentSectionIndex = requestedSectionIndex
@@ -641,6 +646,7 @@ struct NativeReaderView: NSViewRepresentable {
                     scrollView.contentView.scroll(to: .zero)
                     scrollView.reflectScrolledClipView(scrollView.contentView)
                 }
+                alignPagingViewportIfNeeded()
                 reportProgress()
                 speechBridge.refresh()
             } catch {
@@ -704,6 +710,10 @@ struct NativeReaderView: NSViewRepresentable {
             didNotifyContentReady = true
             if let textView {
                 textView.window?.makeFirstResponder(textView)
+            }
+            alignPagingViewportIfNeeded()
+            DispatchQueue.main.async { [weak self] in
+                self?.alignPagingViewportIfNeeded()
             }
             onContentReady()
         }
@@ -811,6 +821,7 @@ struct NativeReaderView: NSViewRepresentable {
                 self.scrollToReadingPosition(position, animated: false)
                 self.isRestoringPosition = false
                 self.positionBeingRestored = nil
+                self.alignPagingViewportIfNeeded()
                 self.reportProgress()
             }
         }
@@ -950,11 +961,10 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func jumpToPage(_ page: Int) {
-            guard settings.flow.isPaging, let scrollView, let textView else { return }
+            guard settings.flow.isPaging, let textView else { return }
             let count = max(1, textView.pageCount)
             let target = min(max(page, 1), count) - 1
-            let height = max(1, scrollView.contentView.bounds.height)
-            scroll(to: CGFloat(target) * height, animated: true)
+            scroll(to: CGFloat(target) * currentViewportHeight(), animated: true)
             reportProgress()
         }
 
@@ -1181,20 +1191,21 @@ struct NativeReaderView: NSViewRepresentable {
                   let book, book.spine.indices.contains(speech.sectionIndex), let textView, let scrollView else { return nil }
             let position = SpeechPosition(sectionIndex: speech.sectionIndex,
                 spineID: spineIdentity(book.spine[speech.sectionIndex]), range: speech.sentences[index].range)
+            let viewportHeight = currentViewportHeight()
             if let range = speechDocumentRange(position), let offset = textView.pageOffset(forCharacter: range.location) {
-                return Int((offset / max(1, scrollView.contentSize.height)).rounded()) + 1
+                return Int((offset / viewportHeight).rounded()) + 1
             }
             guard let document = try? chapterDocument(at: position.sectionIndex) else { return nil }
-            let measurement = ReaderTextView(frame: NSRect(origin: .zero, size: scrollView.contentSize))
+            let measurement = ReaderTextView(frame: NSRect(origin: .zero, size: NSSize(width: scrollView.contentSize.width, height: viewportHeight)))
             measurement.isVerticallyResizable = true
             measurement.isHorizontallyResizable = false
             measurement.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
             measurement.preferredReadingWidth = textView.preferredReadingWidth
             measurement.setReadingInsets(horizontal: max(34, settings.margin), vertical: max(64, settings.margin))
             measurement.textStorage?.setAttributedString(document.attributedText)
-            measurement.configurePageColumns(settings.flow.pageColumns.rawValue, viewportHeight: scrollView.contentSize.height)
+            measurement.configurePageColumns(settings.flow.pageColumns.rawValue, viewportHeight: viewportHeight)
             guard let offset = measurement.pageOffset(forCharacter: position.range.location) else { return nil }
-            return Int((offset / max(1, scrollView.contentSize.height)).rounded()) + 1
+            return Int((offset / viewportHeight).rounded()) + 1
         }
 
         private func revealSpeechPosition(_ position: SpeechPosition) {
@@ -1417,9 +1428,32 @@ struct NativeReaderView: NSViewRepresentable {
 
         @discardableResult
         private func updateDocumentLayout() -> CGFloat {
-            guard let scrollView, let textView else { return 0 }
-            textView.updateDocumentHeight(minimumHeight: scrollView.contentSize.height)
-            return max(scrollView.contentSize.height, textView.frame.height)
+            guard let textView else { return 0 }
+            let viewportHeight = currentViewportHeight()
+            textView.updateDocumentHeight(minimumHeight: viewportHeight)
+            return max(viewportHeight, textView.frame.height)
+        }
+
+        private func currentViewportHeight() -> CGFloat {
+            guard let scrollView else { return 1 }
+            let height = scrollView.contentView.bounds.height
+            if height > 1 { return height }
+            let contentHeight = scrollView.contentSize.height
+            if contentHeight > 1 { return contentHeight }
+            return max(1, scrollView.bounds.height)
+        }
+
+        private func alignPagingViewportIfNeeded() {
+            guard settings.flow.isPaging,
+                  !updatingDocument,
+                  (scrollView as? ReaderScrollView)?.isPageTransitionActive != true,
+                  let scrollView else { return }
+            let step = currentViewportHeight()
+            let current = scrollView.contentView.bounds.origin.y
+            let target = (current / step).rounded() * step
+            guard abs(target - current) > 0.5 else { return }
+            logger.debug("对齐分页视口: from=\(current, privacy: .public), to=\(target, privacy: .public)")
+            scroll(to: target, animated: false)
         }
 
         private func maximumScrollOffset() -> CGFloat {
@@ -1480,7 +1514,7 @@ struct NativeReaderView: NSViewRepresentable {
             let oldIndex = currentSectionIndex
             let oldLocation = firstVisibleCharacterLocation()
             let oldSelection = textView.selectedRange()
-            let height = max(1, scrollView.contentView.bounds.height)
+            let height = currentViewportHeight()
             let currentPage = Int((scrollView.contentView.bounds.origin.y / height).rounded())
             let targetPage = currentPage + direction
             var oldDocument: NativeChapterDocument?
@@ -1511,8 +1545,7 @@ struct NativeReaderView: NSViewRepresentable {
         private func seekWithinChapter(to fraction: Double, animated: Bool) {
             let count = max(1, textView?.pageCount ?? 1)
             let page = Int((min(1, max(0, fraction)) * Double(count - 1)).rounded())
-            let height = scrollView?.contentView.bounds.height ?? 1
-            scroll(to: CGFloat(page) * height, animated: animated)
+            scroll(to: CGFloat(page) * currentViewportHeight(), animated: animated)
             reportProgress()
         }
 
@@ -1702,7 +1735,7 @@ struct NativeReaderView: NSViewRepresentable {
                 }
             } else if settings.flow.isPaging {
                 localLocation = visibleLocation
-                let page = Int((scrollView.contentView.bounds.origin.y / max(1, scrollView.contentSize.height)).rounded())
+                let page = Int((scrollView.contentView.bounds.origin.y / currentViewportHeight()).rounded())
                 let count = max(1, textView?.pageCount ?? 1)
                 let chapterFraction = count > 1
                     ? Double(page) / Double(count - 1)
@@ -1722,9 +1755,8 @@ struct NativeReaderView: NSViewRepresentable {
         }
 
         private func reportPageInfo(offset: CGFloat) {
-            guard settings.flow.isPaging,
-                  let scrollView else { return }
-            let step = max(1, scrollView.contentView.bounds.height)
+            guard settings.flow.isPaging else { return }
+            let step = currentViewportHeight()
             let page = max(1, Int((offset / step).rounded()) + 1)
             let count = textView?.pageCount ?? 1
             DispatchQueue.main.async { [weak self] in

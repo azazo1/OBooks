@@ -239,7 +239,6 @@ struct ReaderView: View {
                 onContentReady: revealReader
             )
             .opacity(isOpening ? 0 : 1)
-            .scaleEffect(isOpening ? 0.985 : 1)
             .allowsHitTesting(!isOpening)
             topBar
         }

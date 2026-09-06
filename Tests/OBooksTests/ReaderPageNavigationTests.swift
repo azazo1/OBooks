@@ -4,6 +4,20 @@ import XCTest
 
 @MainActor
 final class ReaderPageNavigationTests: XCTestCase {
+    func testPagedViewportIgnoresNativeCaretScroll() async throws {
+        let reader = try Fixture()
+        defer { reader.close() }
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0)
+        reader.scrollView.scroll(to: 8, animated: false)
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0, accuracy: 0.5)
+        reader.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 8))
+        reader.scrollView.reflectScrolledClipView(reader.scrollView.contentView)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0, accuracy: 0.5)
+        _ = reader.textView.scrollToVisible(NSRect(x: 0, y: 24, width: 40, height: 18))
+        XCTAssertEqual(reader.scrollView.contentView.bounds.minY, 0, accuracy: 0.5)
+    }
+
     func testOpeningSavedPositionKeepsPageAndAllowsFurtherTurns() async throws {
         let position = ReadingPosition(spineID: "chapter-0", characterOffset: 1500)
         let reader = try Fixture(position: position)

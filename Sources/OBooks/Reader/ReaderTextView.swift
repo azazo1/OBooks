@@ -217,6 +217,12 @@ final class ReaderTextView: NSTextView {
         super.scrollRangeToVisible(range)
     }
 
+    override func scrollToVisible(_ rect: NSRect) -> Bool {
+        // 分页模式下原生插入点滚动会把 clip view 带离页边界, 进入书本时出现微小偏移.
+        if pageColumns > 0 { return true }
+        return super.scrollToVisible(rect)
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard pageColumns > 0 else { return super.hitTest(point) }
         let localPoint = convert(point, from: superview)

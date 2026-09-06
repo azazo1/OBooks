@@ -239,8 +239,13 @@ final class ReaderScrollView: NSScrollView {
     }
 
     func scroll(to offset: CGFloat, animated: Bool, forSpeech: Bool = false) {
+        let step = max(1, contentView.bounds.height)
         let maximum = max(0, (documentView?.frame.height ?? 0) - contentView.bounds.height)
-        let target = min(max(offset, 0), maximum)
+        var target = min(max(offset, 0), maximum)
+        if pageFlow.isPaging {
+            target = (target / step).rounded() * step
+            target = min(max(target, 0), maximum)
+        }
         guard animated, !pageFlow.isPaging, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             stopSmoothScroll()
             setScrollOffset(target)
