@@ -15,6 +15,10 @@ struct SyncSettingsView: View {
     }
 
     private var busy: Bool { sync.isSyncing || !sync.downloading.isEmpty }
+    private var settingsError: String? {
+        if appModel.accountForm != nil { return sync.lastError }
+        return appModel.accountActionError ?? sync.lastError
+    }
     private var bound: Bool { sync.account != nil }
     private var editAction: (() -> Void)? {
         sync.isSignedIn ? { [self] in openForm(.edit) } : nil
@@ -67,7 +71,7 @@ struct SyncSettingsView: View {
                     if sync.isSyncing { ProgressView().controlSize(.small) }
                     if sync.pendingCount > 0 { Text("待同步: \(sync.pendingCount)").foregroundStyle(.secondary) }
                     if let date = sync.lastSyncedAt { Text("最近同步: " + date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }
-                    if let error = appModel.accountActionError ?? sync.lastError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                    if let error = settingsError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                 }
                 .font(.callout)
                 actionRow

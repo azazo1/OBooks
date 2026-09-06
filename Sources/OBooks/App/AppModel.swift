@@ -470,6 +470,11 @@ final class AppModel: ObservableObject {
         accountForm = kind
     }
 
+    func closeAccountForm() {
+        accountActionError = nil
+        accountForm = nil
+    }
+
     func switchToProfile(_ profileID: String) {
         do {
             try switchToProfileThrowing(profileID)

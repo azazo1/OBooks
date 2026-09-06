@@ -121,7 +121,7 @@ struct AccountFormView: View {
     }
 
     private func close() {
-        appModel.accountForm = nil
+        appModel.closeAccountForm()
         dismissWindow(id: "account-form")
     }
 
