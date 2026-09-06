@@ -11,6 +11,11 @@ struct AppAlert: Identifiable {
     let message: String
 }
 
+enum AccountFormKind: Equatable {
+    case add
+    case edit
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var books: [BookSummary]
@@ -23,6 +28,8 @@ final class AppModel: ObservableObject {
     let speechPlaybackOwner = SpeechPlaybackOwner()
     let sync: SyncCoordinator
     let workspace: LibraryWorkspace?
+    @Published var accountForm: AccountFormKind?
+    @Published private(set) var accountActionError: String?
     @Published private(set) var copyStatus: String?
     private var readingStatsStore: ReadingStatsStore
     private var readingStatsTracker: ReadingStatsTracker!
@@ -458,6 +465,11 @@ final class AppModel: ObservableObject {
         return (try? SyncCredentialStore(rootURL: workspace.root(for: profile.id)).read()) != nil
     }
 
+    func openAccountForm(_ kind: AccountFormKind) {
+        accountActionError = nil
+        accountForm = kind
+    }
+
     func switchToProfile(_ profileID: String) {
         do {
             try switchToProfileThrowing(profileID)
@@ -469,40 +481,51 @@ final class AppModel: ObservableObject {
 
     @discardableResult
     func loginToAccount(server: String, username: String, password: String, deviceName: String? = nil) async -> Bool {
+        accountActionError = nil
         let previousID = workspace?.activeID
         do {
             let url = try SyncAPI.validateServer(server)
             try persistCurrentProfile()
-            if let workspace {
-                let profile = try workspace.ensureAccountProfile(server: url, username: username)
-                if profile.id != workspace.activeID {
-                    try switchToProfileThrowing(profile.id, persistCurrent: false)
-                }
+            let trimmedName = deviceName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let account = sync.account, account.server == url, account.username == username {
+                if let trimmedName, !trimmedName.isEmpty { sync.deviceName = trimmedName }
+                await sync.login(server: server, username: username, password: password)
+                if sync.isSignedIn { return true }
+                accountActionError = sync.lastError
+                return false
             }
-            if let deviceName {
-                let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { sync.deviceName = trimmed }
+            guard let workspace else {
+                if let trimmedName, !trimmedName.isEmpty { sync.deviceName = trimmedName }
+                await sync.login(server: server, username: username, password: password)
+                if sync.isSignedIn { return true }
+                accountActionError = sync.lastError
+                return false
             }
-            await sync.login(server: server, username: username, password: password)
-            if sync.isSignedIn {
-                if let workspace, let account = sync.account {
-                    try workspace.updateUserID(account.userID, for: workspace.activeID)
-                }
-                objectWillChange.send()
-                return true
-            }
-            let message = sync.lastError
-            try restoreProfile(previousID)
-            if let message {
-                sync.retainError(message, status: "登录失败")
-                alert = AppAlert(title: "登录失败", message: message)
-            }
-            return false
+            try await adoptRemoteAccount(
+                workspace: workspace,
+                server: url,
+                username: username,
+                password: password,
+                deviceName: trimmedName
+            )
+            objectWillChange.send()
+            return true
         } catch {
             try? restoreProfile(previousID)
-            alert = AppAlert(title: "登录失败", message: error.localizedDescription)
+            accountActionError = error.localizedDescription
             return false
         }
+    }
+
+    func updateAccount(deviceName: String?, currentPassword: String?, newPassword: String?) async -> Bool {
+        accountActionError = nil
+        await sync.updateAccount(deviceName: deviceName, currentPassword: currentPassword, newPassword: newPassword)
+        if let error = sync.lastError {
+            accountActionError = error
+            return false
+        }
+        objectWillChange.send()
+        return true
     }
 
     func copyFromLocalProfile(_ profile: LibraryProfile) {
@@ -531,6 +554,45 @@ final class AppModel: ObservableObject {
                 alert = AppAlert(title: "复制失败", message: error.localizedDescription)
             }
         }
+    }
+
+    private func adoptRemoteAccount(
+        workspace: LibraryWorkspace,
+        server: URL,
+        username: String,
+        password: String,
+        deviceName: String?
+    ) async throws {
+        var journal = SyncJournal()
+        if let existing = workspace.profile(server: server, username: username) {
+            journal = (try? SyncJournalStore(rootURL: workspace.root(for: existing.id)).load()) ?? SyncJournal()
+        }
+        let name = (deviceName?.isEmpty == false ? deviceName : nil) ?? journal.deviceName
+        let probe = MemorySyncCredentials()
+        let tokens: SyncTokens
+        do {
+            tokens = try await SyncAPI(server: server, credentials: probe).login(
+                username: username,
+                password: password,
+                deviceID: journal.deviceID,
+                deviceName: name
+            )
+        } catch CloudSyncError.unauthorized {
+            throw CloudSyncError.message("账号或密码无效")
+        }
+        let profile = try workspace.ensureAccountProfile(server: server, username: username)
+        journal.account = SyncAccount(server: server, username: username, userID: tokens.userID)
+        journal.deviceName = name
+        try SyncJournalStore(rootURL: workspace.root(for: profile.id)).save(journal)
+        try SyncCredentialStore(rootURL: workspace.root(for: profile.id)).write(tokens.refreshToken)
+        try workspace.updateUserID(tokens.userID, for: profile.id)
+        if profile.id != workspace.activeID {
+            try switchToProfileThrowing(profile.id, persistCurrent: false)
+        } else {
+            sync.rebind(rootURL: workspace.activeRoot)
+        }
+        logger.info("已保存账号: \(profile.title, privacy: .public)")
+        if sync.isSignedIn { await sync.synchronize() }
     }
 
     private func persistCurrentProfile() throws {

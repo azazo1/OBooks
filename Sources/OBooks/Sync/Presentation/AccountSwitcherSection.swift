@@ -7,7 +7,7 @@ struct AccountSwitcherSection: View {
     let busy: Bool
     let hasSavedSession: (LibraryProfile) -> Bool
     let onAdd: () -> Void
-    let addingAccount: Bool
+    let onEdit: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -18,8 +18,10 @@ struct AccountSwitcherSection: View {
             }
             .pickerStyle(.menu)
             .disabled(busy)
-            if !addingAccount {
-                Button("添加账号", action: onAdd)
+            Button("添加账号", action: onAdd)
+                .disabled(busy)
+            if let onEdit {
+                Button("编辑账号", action: onEdit)
                     .disabled(busy)
             }
         }

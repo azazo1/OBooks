@@ -61,6 +61,7 @@ final class LibraryWorkspaceTests: XCTestCase {
         XCTAssertTrue(model.sync.isSignedIn)
         XCTAssertEqual(try SyncCredentialStore(rootURL: workspace.root(for: alice.id)).read(), "alice-token")
         XCTAssertEqual(model.books.map(\.title), ["Alice Book"])
+        XCTAssertNil(workspace.profile(server: server, username: "carol"))
     }
 
     private func seedAccount(

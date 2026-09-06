@@ -3,11 +3,10 @@ import SwiftUI
 struct SyncSettingsView: View {
     @ObservedObject var appModel: AppModel
     @ObservedObject var sync: SyncCoordinator
+    @Environment(\.openWindow) private var openWindow
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
-    @State private var addingAccount = false
-    @State private var newDeviceName = Host.current().localizedName ?? "Mac"
 
     init(appModel: AppModel) {
         _appModel = ObservedObject(wrappedValue: appModel)
@@ -15,7 +14,10 @@ struct SyncSettingsView: View {
     }
 
     private var busy: Bool { sync.isSyncing || !sync.downloading.isEmpty }
-    private var bound: Bool { sync.account != nil && !addingAccount }
+    private var bound: Bool { sync.account != nil }
+    private var editAction: (() -> Void)? {
+        sync.isSignedIn ? { [self] in openForm(.edit) } : nil
+    }
     private var selectedProfileID: Binding<String> {
         Binding(
             get: { appModel.workspace?.activeID ?? "" },
@@ -40,15 +42,11 @@ struct SyncSettingsView: View {
                         selectedID: selectedProfileID,
                         busy: busy,
                         hasSavedSession: appModel.hasSavedSession(for:),
-                        onAdd: beginAddingAccount,
-                        addingAccount: addingAccount
+                        onAdd: { openForm(.add) },
+                        onEdit: editAction
                     )
                 }
-                if addingAccount {
-                    addAccountForm
-                } else {
-                    currentAccountForm
-                }
+                currentAccountForm
                 if let profile = appModel.workspace?.activeProfile {
                     Text(profile.isUnbound ? "当前是未绑定书库, 登录其他账号会新建空书库, 不会带走这里的书." : "当前书库: " + profile.title)
                         .font(.callout)
@@ -61,7 +59,7 @@ struct SyncSettingsView: View {
                     if sync.isSyncing { ProgressView().controlSize(.small) }
                     if sync.pendingCount > 0 { Text("待同步: \(sync.pendingCount)").foregroundStyle(.secondary) }
                     if let date = sync.lastSyncedAt { Text("最近同步: " + date.formatted(date: .abbreviated, time: .shortened)).foregroundStyle(.secondary) }
-                    if let error = sync.lastError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+                    if let error = appModel.accountActionError ?? sync.lastError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                 }
                 .font(.callout)
                 actionRow
@@ -81,7 +79,7 @@ struct SyncSettingsView: View {
         .frame(minWidth: 500, idealWidth: 520, maxHeight: 680)
         .onAppear { fillFromAccount() }
         .onChange(of: appModel.workspace?.activeID ?? "") { _, _ in
-            if !addingAccount { fillFromAccount() }
+            fillFromAccount()
         }
     }
 
@@ -99,39 +97,6 @@ struct SyncSettingsView: View {
         }
     }
 
-    private var addAccountForm: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("登录新账号不会退出当前账号.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Form {
-                TextField("服务地址", text: $server, prompt: Text("https://books.example.com"))
-                    .disabled(busy)
-                TextField("用户名", text: $username)
-                    .disabled(busy)
-                TextField("设备名称", text: $newDeviceName)
-                    .disabled(busy)
-                SecureField("密码", text: $password)
-                    .disabled(busy)
-            }
-            HStack {
-                Button("取消") {
-                    addingAccount = false
-                    password = ""
-                    fillFromAccount()
-                }
-                .disabled(busy)
-                Spacer()
-                Button("登录新账号") {
-                    submitLogin(deviceName: newDeviceName)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(server.isEmpty || username.isEmpty || password.isEmpty || busy)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-    }
-
     @ViewBuilder
     private var actionRow: some View {
         HStack {
@@ -144,14 +109,14 @@ struct SyncSettingsView: View {
                 Button("退出登录") {
                     Task {
                         await sync.logout()
-                        if !addingAccount { fillFromAccount() }
+                        fillFromAccount()
                     }
                 }
                 .disabled(busy)
-            } else if !addingAccount {
+            } else {
                 Spacer()
                 Button("登录") {
-                    submitLogin(deviceName: nil)
+                    submitLogin()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(server.isEmpty || username.isEmpty || password.isEmpty || busy)
@@ -160,22 +125,18 @@ struct SyncSettingsView: View {
         }
     }
 
-    private func beginAddingAccount() {
-        addingAccount = true
-        server = ""
-        username = ""
-        password = ""
-        newDeviceName = Host.current().localizedName ?? "Mac"
+    private func openForm(_ kind: AccountFormKind) {
+        appModel.openAccountForm(kind)
+        openWindow(id: "account-form")
     }
 
     private func switchToProfile(_ profile: LibraryProfile) {
-        addingAccount = false
         password = ""
         appModel.switchToProfile(profile.id)
         fillFromAccount()
     }
 
-    private func submitLogin(deviceName: String?) {
+    private func submitLogin() {
         let secret = password
         password = ""
         Task {
@@ -183,17 +144,13 @@ struct SyncSettingsView: View {
                 server: server,
                 username: username,
                 password: secret,
-                deviceName: deviceName
+                deviceName: sync.deviceName
             )
-            if signedIn {
-                addingAccount = false
-                fillFromAccount()
-            }
+            if signedIn { fillFromAccount() }
         }
     }
 
     private func fillFromAccount() {
-        guard !addingAccount else { return }
         server = sync.account?.server.absoluteString ?? ""
         username = sync.account?.username ?? ""
     }

@@ -118,6 +118,27 @@ final class SyncCoordinator: ObservableObject {
         self.status = status
     }
 
+    func updateAccount(deviceName: String?, currentPassword: String?, newPassword: String?) async {
+        guard let api, isSignedIn, !isSyncing, downloading.isEmpty else {
+            report(CloudSyncError.message("请登录后再修改账号"))
+            return
+        }
+        do {
+            try await api.updateAccount(deviceName: deviceName, currentPassword: currentPassword, newPassword: newPassword)
+            if let deviceName {
+                let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    self.deviceName = trimmed
+                    journal.deviceName = trimmed
+                    try persist()
+                }
+            }
+            lastError = nil
+            status = "账号已更新"
+            logger.info("账号已更新")
+        } catch { report(error) }
+    }
+
     func login(server: String, username: String, password: String) async {
         guard !storageFailed, !isSyncing, downloading.isEmpty else { return }
         do {

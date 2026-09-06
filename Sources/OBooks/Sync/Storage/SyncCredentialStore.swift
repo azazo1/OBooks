@@ -6,6 +6,13 @@ protocol SyncCredentialStorage {
     func remove() throws
 }
 
+final class MemorySyncCredentials: SyncCredentialStorage {
+    private var token: String?
+    func read() throws -> String? { token }
+    func write(_ value: String) throws { token = value }
+    func remove() throws { token = nil }
+}
+
 struct SyncCredentialStore: SyncCredentialStorage {
     private let url: URL
     private let fileManager = FileManager.default

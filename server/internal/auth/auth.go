@@ -139,3 +139,28 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	_, err := s.DB.ExecContext(ctx, "DELETE FROM sessions WHERE refresh_hash=?", hashToken(token))
 	return err
 }
+
+func (s *Service) ChangePassword(ctx context.Context, id Identity, current, next string) error {
+	var hash string
+	err := s.DB.QueryRowContext(ctx, "SELECT password_hash FROM users WHERE id=? AND disabled=0", id.UserID).Scan(&hash)
+	if err != nil || !verifyPassword(hash, current) { return ErrUnauthorized }
+	nextHash, err := hashPassword(next)
+	if err != nil { return err }
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil { return err }
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "UPDATE users SET password_hash=? WHERE id=?", nextHash, id.UserID); err != nil { return err }
+	if _, err = tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id=? AND device_id!=?", id.UserID, id.DeviceID); err != nil { return err }
+	return tx.Commit()
+}
+
+func (s *Service) RenameDevice(ctx context.Context, id Identity, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > 200 { return errors.New("设备名称无效") }
+	result, err := s.DB.ExecContext(ctx, "UPDATE devices SET name=?, last_seen=? WHERE user_id=? AND id=?", name, time.Now().Unix(), id.UserID, id.DeviceID)
+	if err != nil { return err }
+	n, err := result.RowsAffected()
+	if err != nil { return err }
+	if n == 0 { return errors.New("设备不存在") }
+	return nil
+}

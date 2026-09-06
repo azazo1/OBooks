@@ -107,6 +107,20 @@ func TestAuthRotationDisableAndIsolation(t *testing.T) {
 	f.decode(t, f.call("GET", "/v1/sync/pull?cursor=0", newTokens.AccessToken, nil), 401, nil)
 }
 
+func TestAccountPasswordAndDeviceName(t *testing.T) {
+	f := setup(t)
+	other, err := f.api.Auth.Login(context.Background(), "alice", "a-long-test-password", "other-device", "B")
+	if err != nil { t.Fatal(err) }
+	f.decode(t, f.call("POST", "/v1/auth/account", f.tokens.AccessToken, map[string]string{"newPassword":"replacement-password"}), 400, nil)
+	f.decode(t, f.call("POST", "/v1/auth/account", f.tokens.AccessToken, map[string]string{"currentPassword":"wrong-password-long", "newPassword":"replacement-password"}), 401, nil)
+	f.decode(t, f.call("POST", "/v1/auth/account", f.tokens.AccessToken, map[string]string{"currentPassword":"a-long-test-password", "newPassword":"replacement-password", "deviceName":"Mac"}), 204, nil)
+	f.decode(t, f.call("GET", "/v1/sync/pull?cursor=0", f.tokens.AccessToken, nil), 200, nil)
+	f.decode(t, f.call("GET", "/v1/sync/pull?cursor=0", other.AccessToken, nil), 401, nil)
+	f.decode(t, f.call("POST", "/v1/auth/login", "", map[string]string{"username":"alice", "password":"a-long-test-password", "deviceID":"x", "deviceName":"C"}), 401, nil)
+	var tokens auth.Tokens
+	f.decode(t, f.call("POST", "/v1/auth/login", "", map[string]string{"username":"alice", "password":"replacement-password", "deviceID":"x", "deviceName":"C"}), 200, &tokens)
+}
+
 func TestIdempotenceProgressConflictAndDeletion(t *testing.T) {
 	f := setup(t)
 	first := bookChange()

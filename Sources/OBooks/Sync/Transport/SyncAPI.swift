@@ -76,6 +76,21 @@ final class SyncAPI {
         try credentials.remove()
     }
 
+    func updateAccount(deviceName: String?, currentPassword: String?, newPassword: String?) async throws {
+        struct Body: Encodable {
+            var deviceName: String?
+            var currentPassword: String?
+            var newPassword: String?
+        }
+        let body = try SyncCoding.encoder().encode(Body(deviceName: deviceName, currentPassword: currentPassword, newPassword: newPassword))
+        try await authorized { token in
+            var request = self.makeRequest("v1/auth/account", method: "POST", body: body)
+            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            let (data, response) = try await self.session.data(for: request)
+            try self.check(response, data: data)
+        }
+    }
+
     func pull(cursor: Int64) async throws -> SyncPull {
         try await request("v1/sync/pull", query: [URLQueryItem(name: "cursor", value: String(cursor))])
     }

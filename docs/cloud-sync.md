@@ -28,7 +28,7 @@ just server-run --settings settings.json
 
 ## 账号和设备
 
-在书库侧栏打开云同步设置, 填写服务地址, 用户名, 密码和设备名称. 同一账号可在多个设备登录, 不同账号的数据和文件相互隔离. refresh token 以 0600 权限保存在书库目录的 `sync-refresh-token` 中, 同步文件不保存密码.
+在书库侧栏打开云同步设置. 可同时保存多个账号, 切换时不会退出其他会话. 添加账号在独立窗口中填写, 登录成功后才写入本机账号列表. 已登录时可编辑设备名称或修改云端密码; 改密后其他设备需要重新登录. refresh token 以 0600 权限保存在书库目录的 `sync-refresh-token` 中, 同步文件不保存密码.
 
 ```shell
 just server-admin user-reset --username reader
@@ -61,6 +61,7 @@ just server-admin user-disable --username reader
 | `POST /auth/login` | 用户名和密码登录, 注册设备 |
 | `POST /auth/refresh` | 轮换 refresh token 并取得 access token |
 | `POST /auth/logout` | 撤销当前会话 |
+| `POST /auth/account` | 已登录用户修改设备名称或密码, 改密会撤销其他设备会话 |
 | `POST /sync/push` | 原子提交最多 200 条变更, 请求体上限 4 MiB |
 | `GET /sync/pull?cursor=...` | 按用户游标分页拉取, 每页最多 200 条 |
 | `GET/HEAD/PUT /books/{bookID}/content` | 检查, 上传或下载 EPUB, 下载支持 Range |

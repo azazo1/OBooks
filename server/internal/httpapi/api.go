@@ -35,6 +35,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/auth/login", a.login)
 	mux.HandleFunc("POST /v1/auth/refresh", a.refresh)
 	mux.HandleFunc("POST /v1/auth/logout", a.logout)
+	mux.HandleFunc("POST /v1/auth/account", a.authorized(a.account))
 	mux.HandleFunc("GET /v1/sync/pull", a.authorized(a.pull))
 	mux.HandleFunc("POST /v1/sync/push", a.authorized(a.push))
 	for _, kind := range []string{"content", "cover"} {
@@ -121,6 +122,37 @@ func (a *API) logout(w http.ResponseWriter, r *http.Request) {
 	var body struct { RefreshToken string `json:"refreshToken"` }
 	if !decode(w, r, &body, 8<<10) { return }
 	if err := a.Auth.Logout(r.Context(), body.RefreshToken); err != nil { a.internalError(w, err); return }
+	w.WriteHeader(204)
+}
+
+func (a *API) account(w http.ResponseWriter, r *http.Request, id auth.Identity) {
+	var body struct {
+		DeviceName *string `json:"deviceName"`
+		CurrentPassword *string `json:"currentPassword"`
+		NewPassword *string `json:"newPassword"`
+	}
+	if !decode(w, r, &body, 8<<10) { return }
+	if body.DeviceName == nil && body.NewPassword == nil {
+		fail(w, 400, "invalid_request", "没有要更新的账号信息")
+		return
+	}
+	if body.NewPassword != nil {
+		if body.CurrentPassword == nil {
+			fail(w, 400, "invalid_request", "修改密码需要提供当前密码")
+			return
+		}
+		err := a.Auth.ChangePassword(r.Context(), id, *body.CurrentPassword, *body.NewPassword)
+		if errors.Is(err, auth.ErrUnauthorized) { fail(w, 401, "unauthorized", "当前密码不正确"); return }
+		if err != nil { fail(w, 400, "invalid_request", err.Error()); return }
+		a.Logger.Info("修改密码", "user", id.UserID)
+	}
+	if body.DeviceName != nil {
+		if err := a.Auth.RenameDevice(r.Context(), id, *body.DeviceName); err != nil {
+			fail(w, 400, "invalid_request", err.Error())
+			return
+		}
+		a.Logger.Info("更新设备名称", "user", id.UserID, "device", id.DeviceID)
+	}
 	w.WriteHeader(204)
 }
 
