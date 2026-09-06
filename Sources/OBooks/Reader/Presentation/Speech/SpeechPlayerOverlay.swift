@@ -68,7 +68,7 @@ struct SpeechPlayerOverlay: View {
     }
 
     private var miniPlayer: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 8) {
             Button { session.isExpanded = true } label: {
                 HStack(spacing: 9) {
                     cover
@@ -82,14 +82,17 @@ struct SpeechPlayerOverlay: View {
             }
             .buttonStyle(.plain)
             .help("展开朗读播放器")
-            control("backward.end.fill", "上一句") { controller.send(.speechStep(-1, paragraph: false)) }
-                .disabled(session.sentences.isEmpty)
-            playButton(size: 34)
-            control("forward.end.fill", "下一句") { controller.send(.speechStep(1, paragraph: false)) }
-                .disabled(session.sentences.isEmpty)
-            sleepMenu(compact: true)
-            control("minus", "最小化朗读播放器") { session.minimizePlayer() }
-            control("stop.fill", "停止朗读") { controller.send(.stopSpeech) }
+            HStack(spacing: 5) {
+                control("backward.end.fill", "上一句") { controller.send(.speechStep(-1, paragraph: false)) }
+                    .disabled(session.sentences.isEmpty)
+                playButton(size: 34)
+                control("forward.end.fill", "下一句") { controller.send(.speechStep(1, paragraph: false)) }
+                    .disabled(session.sentences.isEmpty)
+                sleepMenu(compact: true)
+                control("minus", "最小化朗读播放器") { session.minimizePlayer() }
+                control("stop.fill", "停止朗读") { controller.send(.stopSpeech) }
+            }
+            .fixedSize()
         }
         .padding(.horizontal, 10)
         .padding(.bottom, 12)
@@ -208,6 +211,7 @@ struct SpeechPlayerOverlay: View {
                     .font(.system(size: 12))
                     .frame(width: 28, height: 28)
                     .foregroundStyle(session.sleepOption == .off ? .primary : Color.accentColor)
+                    .contentShape(Rectangle())
             } else {
                 Label {
                     sleepMenuTitle
@@ -221,6 +225,7 @@ struct SpeechPlayerOverlay: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(compact ? .hidden : .automatic)
+        .fixedSize(horizontal: compact, vertical: true)
         .help("朗读定时结束")
         .accessibilityLabel("朗读定时结束")
         .accessibilityValue(session.sleepStatusText() ?? "关闭")
