@@ -7,6 +7,7 @@ struct NativeReaderAppearance {
     let selection: NSColor
     let userHighlight: NSColor
     let speechHighlight: NSColor
+    let searchHighlight: NSColor
 
     init(theme: ReadingTheme) {
         switch theme {
@@ -30,5 +31,6 @@ struct NativeReaderAppearance {
         selection = NSColor.controlAccentColor.withAlphaComponent(0.28)
         userHighlight = NSColor.systemYellow.withAlphaComponent(0.42)
         speechHighlight = NSColor.systemBlue.withAlphaComponent(0.32)
+        searchHighlight = NSColor.systemOrange.withAlphaComponent(0.4)
     }
 }

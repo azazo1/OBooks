@@ -139,6 +139,7 @@ enum ReaderAction: Equatable {
     case speechRate(Double)
     case speechVoice(String)
     case revealSpeech
+    case jumpToPage(Int)
 }
 
 struct ReaderAnnotation: Identifiable, Equatable, Codable, Hashable {

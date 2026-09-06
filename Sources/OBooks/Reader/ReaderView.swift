@@ -79,10 +79,12 @@ struct ReaderView: View {
     let book: BookSummary
     private let tocIndex: ReaderTOCIndex
     @State private var controller = ReaderController()
+    @StateObject private var searchSession = ReaderSearchSession()
     @State private var sectionIndex = 0
     @State private var pendingAnchor: String?
     @State private var pendingPosition: ReadingPosition?
     @State private var pendingPositionAnimated = false
+    @State private var pendingSearchReveal: ReaderSearchReveal?
     @State private var currentPosition: ReadingPosition?
     @State private var currentProgressFraction = 0.0
     @State private var jumpBackPosition: ReadingPosition?
@@ -96,7 +98,7 @@ struct ReaderView: View {
     @State private var pageCount = 1
     @State private var activePanel: ReaderPanel?
     @State private var currentTOCEntryID: UUID?
-    @State private var searchQuery = ""
+
     @State private var isSpeaking = false
     @State private var speechOverlayRect = CGRect.zero
     @State private var chromeVisible = true
@@ -149,6 +151,7 @@ struct ReaderView: View {
                 pendingAnchor: $pendingAnchor,
                 pendingPosition: $pendingPosition,
                 pendingPositionAnimated: $pendingPositionAnimated,
+                pendingSearchReveal: $pendingSearchReveal,
                 theme: theme,
                 flow: flow,
                 fontSize: fontSize,
@@ -229,6 +232,9 @@ struct ReaderView: View {
                 onPositionConsumed: {
                     pendingPosition = nil
                     pendingPositionAnimated = false
+                },
+                onSearchConsumed: {
+                    pendingSearchReveal = nil
                 },
                 onContentReady: revealReader
             )
@@ -478,13 +484,24 @@ struct ReaderView: View {
                 }
             case .bookmarks: bookmarkContent
             case .highlights: highlightsContent
-            case .search: searchContent
+            case .search:
+                ReaderSearchView(
+                    session: searchSession,
+                    isPaging: flow.isPaging,
+                    pageCount: pageCount,
+                    focusedField: $focusedField,
+                    onSelect: openSearchHit,
+                    onJumpToPage: jumpToSearchPage
+                )
             case .settings: settingsContent
             case .flow: flowControls.padding(14)
             case .note: noteEditor
             }
         }
         .onAppear {
+            if panel == .search {
+                searchSession.prepare(book: book, tocIndex: tocIndex)
+            }
             focusedField = panel == .search || panel == .note ? panel : nil
         }
         .onExitCommand { activePanel = nil }
@@ -612,59 +629,6 @@ struct ReaderView: View {
             .padding(12)
         }
         .scrollIndicators(.hidden)
-    }
-
-    private var searchContent: some View {
-        VStack(alignment: .leading, spacing: 17) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("输入一个字词或页码", text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary)
-                    .focused($focusedField, equals: .search)
-                if !searchQuery.isEmpty {
-                    Button {
-                        searchQuery = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(OBooksIconButtonStyle(size: 26, cornerRadius: 7))
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-            .overlay {
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.primary.opacity(0.13), lineWidth: 1)
-            }
-
-            HStack {
-                Text("最近搜索")
-                Spacer()
-                Button("清除") { searchQuery = "" }
-                    .buttonStyle(.plain)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.secondary)
-
-            if searchQuery.isEmpty {
-                Text("输入关键词开始搜索")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text("搜索功能将在下一版连接到章节索引")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-        }
-        .padding(14)
     }
 
     private var settingsContent: some View {
@@ -1020,9 +984,33 @@ struct ReaderView: View {
 
     private func openSearch() {
         guard !isOpening, activeImage == nil else { return }
+        searchSession.prepare(book: book, tocIndex: tocIndex)
         keepChromeVisible()
         activePanel = .search
         focusedField = .search
+    }
+
+    private func openSearchHit(_ hit: ReaderSearchHit) {
+        guard book.spine.indices.contains(hit.sectionIndex) else { return }
+        registerJump()
+        pendingSearchReveal = ReaderSearchReveal(
+            query: hit.query,
+            spineID: hit.spineID,
+            occurrenceIndex: hit.occurrenceIndex
+        )
+        sectionIndex = hit.sectionIndex
+        pendingAnchor = nil
+        let position = ReadingPosition(spineID: hit.spineID, characterOffset: hit.characterOffset)
+        pendingPosition = position
+        pendingPositionAnimated = true
+        currentPosition = position
+        keepChromeVisible()
+    }
+
+    private func jumpToSearchPage(_ page: Int) {
+        registerJump()
+        controller.send(.jumpToPage(page))
+        keepChromeVisible()
     }
 
     private func beginEditingNote(_ annotation: ReaderAnnotation, inPanel: Bool, navigate: Bool = true) {

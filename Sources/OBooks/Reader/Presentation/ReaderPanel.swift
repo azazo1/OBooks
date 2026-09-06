@@ -27,7 +27,7 @@ enum ReaderPanel: String, Identifiable {
 
     var width: CGFloat {
         switch self {
-        case .highlights, .note: return 320
+        case .highlights, .note, .search: return 320
         case .settings, .flow: return 306
         default: return 286
         }
@@ -38,7 +38,7 @@ enum ReaderPanel: String, Identifiable {
         case .toc: return 480
         case .bookmarks: return 240
         case .highlights: return 400
-        case .search: return 180
+        case .search: return 400
         case .settings, .flow, .note: return nil
         }
     }

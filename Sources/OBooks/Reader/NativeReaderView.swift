@@ -8,6 +8,7 @@ struct NativeReaderView: NSViewRepresentable {
     @Binding var pendingAnchor: String?
     @Binding var pendingPosition: ReadingPosition?
     @Binding var pendingPositionAnimated: Bool
+    @Binding var pendingSearchReveal: ReaderSearchReveal?
     let theme: ReadingTheme
     let flow: ReaderFlowMode
     let fontSize: Double
@@ -31,6 +32,7 @@ struct NativeReaderView: NSViewRepresentable {
     let onNavigate: (Int, String?) -> Void
     let onAnchorConsumed: () -> Void
     let onPositionConsumed: () -> Void
+    var onSearchConsumed: () -> Void = {}
     var onContentReady: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
@@ -82,6 +84,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingAnchor: pendingAnchor,
             pendingPosition: pendingPosition,
             pendingPositionAnimated: pendingPositionAnimated,
+            pendingSearchReveal: pendingSearchReveal,
             theme: theme,
             flow: flow,
             fontSize: fontSize,
@@ -102,6 +105,7 @@ struct NativeReaderView: NSViewRepresentable {
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed,
+            onSearchConsumed: onSearchConsumed,
             onContentReady: onContentReady
         )
         context.coordinator.scheduleInitialLoadIfNeeded()
@@ -118,6 +122,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingAnchor: pendingAnchor,
             pendingPosition: pendingPosition,
             pendingPositionAnimated: pendingPositionAnimated,
+            pendingSearchReveal: pendingSearchReveal,
             theme: theme,
             flow: flow,
             fontSize: fontSize,
@@ -138,6 +143,7 @@ struct NativeReaderView: NSViewRepresentable {
             onNavigate: onNavigate,
             onAnchorConsumed: onAnchorConsumed,
             onPositionConsumed: onPositionConsumed,
+            onSearchConsumed: onSearchConsumed,
             onContentReady: onContentReady
         )
         if coordinator.hasCompletedInitialLoad {
@@ -180,12 +186,15 @@ struct NativeReaderView: NSViewRepresentable {
         private var pendingAnchor: String?
         private var pendingPosition: ReadingPosition?
         private var pendingPositionAnimated = false
+        private var pendingSearchReveal: ReaderSearchReveal?
+        private var lastConsumedSearchID: UUID?
         private var currentSectionIndex = -1
         private var anchors: [String: Int] = [:]
         private var settings = Settings(theme: .focus, flow: .scrolling(scope: .chapter), fontSize: 18, lineHeight: 1.7, margin: 56)
         private var loadedSettings: Settings?
         private var annotations: [ReaderAnnotation] = []
         private var renderedAnnotationRanges: [(id: UUID, range: NSRange, kind: String)] = []
+        private var renderedSearchRange: NSRange?
         private var onProgress: (Double, ReadingPosition) -> Void = { _, _ in }
         private var onTOCSelection: (UUID?) -> Void = { _ in }
         private var onPageInfo: (Int, Int) -> Void = { _, _ in }
@@ -201,6 +210,7 @@ struct NativeReaderView: NSViewRepresentable {
         private var onNavigate: (Int, String?) -> Void = { _, _ in }
         private var onAnchorConsumed: () -> Void = {}
         private var onPositionConsumed: () -> Void = {}
+        private var onSearchConsumed: () -> Void = {}
         private var onContentReady: () -> Void = {}
         private var pendingProgress: Double?
         private var pendingReadingPosition: ReadingPosition?
@@ -351,6 +361,7 @@ struct NativeReaderView: NSViewRepresentable {
             pendingAnchor: String?,
             pendingPosition: ReadingPosition?,
             pendingPositionAnimated: Bool,
+            pendingSearchReveal: ReaderSearchReveal? = nil,
             theme: ReadingTheme,
             flow: ReaderFlowMode = .scrolling(scope: .chapter),
             fontSize: Double,
@@ -371,6 +382,7 @@ struct NativeReaderView: NSViewRepresentable {
             onNavigate: @escaping (Int, String?) -> Void,
             onAnchorConsumed: @escaping () -> Void,
             onPositionConsumed: @escaping () -> Void,
+            onSearchConsumed: @escaping () -> Void = {},
             onContentReady: @escaping () -> Void = {}
         ) {
             let nextSettings = Settings(theme: theme, flow: flow, fontSize: fontSize, lineHeight: lineHeight, margin: margin)
@@ -380,7 +392,9 @@ struct NativeReaderView: NSViewRepresentable {
                 speechBridge.follow.userInteraction()
             }
             if settingsChanged || sectionChanged
-                || self.pendingAnchor != pendingAnchor || self.pendingPosition != pendingPosition {
+                || self.pendingAnchor != pendingAnchor
+                || self.pendingPosition != pendingPosition
+                || self.pendingSearchReveal != pendingSearchReveal {
                 (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
             }
             let preservedPosition = settingsChanged ? currentReadingPosition() : nil
@@ -415,6 +429,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.pendingPosition = pendingPosition
             let positionAnimated = pendingPositionAnimated
             self.pendingPositionAnimated = pendingPositionAnimated
+            self.pendingSearchReveal = pendingSearchReveal
             settings = nextSettings
             if let scrollView {
                 scrollView.hasVerticalScroller = flow.scrollScope != nil
@@ -437,6 +452,7 @@ struct NativeReaderView: NSViewRepresentable {
             self.onNavigate = onNavigate
             self.onAnchorConsumed = onAnchorConsumed
             self.onPositionConsumed = onPositionConsumed
+            self.onSearchConsumed = onSearchConsumed
             self.onContentReady = onContentReady
             if annotationsChanged {
                 applyAnnotations()
@@ -445,6 +461,12 @@ struct NativeReaderView: NSViewRepresentable {
             if anchorChanged {
                 handleUserInteraction()
                 speechBridge.follow.userInteraction()
+            }
+            if consumeSearchRevealIfReady() {
+                if self.pendingPosition != nil {
+                    consumePendingPosition()
+                }
+                return
             }
             if anchorChanged,
                let pendingAnchor,
@@ -479,7 +501,7 @@ struct NativeReaderView: NSViewRepresentable {
                 schedulePositionRestoration()
                 consumePendingPosition()
             }
-            if let preservedPosition, pendingPosition == nil, pendingAnchor == nil {
+            if let preservedPosition, pendingPosition == nil, pendingAnchor == nil, pendingSearchReveal == nil {
                 positionBeingRestored = preservedPosition
                 isRestoringPosition = true
             }
@@ -519,6 +541,9 @@ struct NativeReaderView: NSViewRepresentable {
                     }
                 }
                 currentSectionIndex = requestedSectionIndex
+                if consumeSearchRevealIfReady(), pendingPosition != nil {
+                    consumePendingPosition()
+                }
                 reportProgress()
                 return
             }
@@ -551,6 +576,7 @@ struct NativeReaderView: NSViewRepresentable {
                     vertical: max(64, settings.margin)
                 )
                 renderedAnnotationRanges.removeAll()
+                clearSearchHighlight()
                 textView.textStorage?.setAttributedString(attributedText)
                 textView.configurePageColumns(
                     settings.flow.isPaging ? settings.flow.pageColumns.rawValue : 0,
@@ -573,7 +599,11 @@ struct NativeReaderView: NSViewRepresentable {
                 loadedSettings = settings
                 applyAnnotations()
                 updateDocumentLayout()
-                if let pendingAnchor, let location = anchorLocation(pendingAnchor) {
+                if consumeSearchRevealIfReady() {
+                    if pendingPosition != nil {
+                        consumePendingPosition()
+                    }
+                } else if let pendingAnchor, let location = anchorLocation(pendingAnchor) {
                     scrollToCharacter(
                         location,
                         animated: false,
@@ -703,6 +733,10 @@ struct NativeReaderView: NSViewRepresentable {
             case .speechRate(let rate): speech.setRate(rate)
             case .speechVoice(let voice): speech.setVoice(voice)
             case .revealSpeech: speechBridge.follow.resumeNow()
+            case .jumpToPage(let page):
+                speechBridge.follow.userInteraction()
+                (scrollView as? ReaderScrollView)?.prepareForProgrammaticScroll()
+                jumpToPage(page)
             }
         }
 
@@ -737,6 +771,10 @@ struct NativeReaderView: NSViewRepresentable {
             onNavigate = { _, _ in }
             onAnchorConsumed = {}
             onPositionConsumed = {}
+            onSearchConsumed = {}
+            clearSearchHighlight()
+            pendingSearchReveal = nil
+            lastConsumedSearchID = nil
             pendingProgress = nil
             pendingReadingPosition = nil
             speechBridge.teardown()
@@ -798,6 +836,126 @@ struct NativeReaderView: NSViewRepresentable {
                 guard let self, !self.isTornDown else { return }
                 callback()
             }
+        }
+
+        private func consumePendingSearch() {
+            pendingSearchReveal = nil
+            let callback = onSearchConsumed
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.isTornDown else { return }
+                callback()
+            }
+        }
+
+        @discardableResult
+        private func consumeSearchRevealIfReady() -> Bool {
+            guard let reveal = pendingSearchReveal, isSearchRevealReady(reveal) else { return false }
+            if lastConsumedSearchID == reveal.id {
+                consumePendingSearch()
+                return false
+            }
+            handleUserInteraction()
+            speechBridge.follow.userInteraction()
+            revealSearch(reveal)
+            lastConsumedSearchID = reveal.id
+            consumePendingSearch()
+            return true
+        }
+
+        private func isSearchRevealReady(_ reveal: ReaderSearchReveal) -> Bool {
+            guard loadedSettings != nil, let textView, !textView.string.isEmpty else { return false }
+            if loadedBookContent {
+                return sectionRanges[reveal.spineID] != nil
+            }
+            guard let book, book.spine.indices.contains(currentSectionIndex) else { return false }
+            return spineIdentity(book.spine[currentSectionIndex]) == reveal.spineID
+        }
+
+        private func revealSearch(_ reveal: ReaderSearchReveal) {
+            guard let textView else { return }
+            let text = textView.string as NSString
+            let scope: NSRange
+            if loadedBookContent, let range = sectionRanges[reveal.spineID] {
+                scope = range
+            } else {
+                scope = NSRange(location: 0, length: text.length)
+            }
+            guard scope.length > 0 else { return }
+            let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+            var searchRange = scope
+            var found = NSRange(location: NSNotFound, length: 0)
+            var first = NSRange(location: NSNotFound, length: 0)
+            for index in 0...reveal.occurrenceIndex {
+                let match = text.range(of: reveal.query, options: options, range: searchRange)
+                guard match.location != NSNotFound else { break }
+                if index == 0 { first = match }
+                found = match
+                let next = NSMaxRange(match)
+                let end = NSMaxRange(scope)
+                guard next < end else { break }
+                searchRange = NSRange(location: next, length: end - next)
+            }
+            if found.location == NSNotFound {
+                found = first.location == NSNotFound
+                    ? text.range(of: reveal.query, options: options, range: scope)
+                    : first
+            }
+            guard found.location != NSNotFound else { return }
+            logger.debug(
+                "定位搜索结果: occurrence=\(reveal.occurrenceIndex), offset=\(found.location)"
+            )
+            applySearchHighlight(found)
+            textView.setSelectedRange(found)
+            scrollToCharacter(
+                found.location,
+                animated: true,
+                locationIsGlobal: true,
+                viewportOffset: settings.flow.isPaging ? 0 : scrollNavigationRevealOffset
+            )
+        }
+
+        private func applySearchHighlight(_ range: NSRange) {
+            clearSearchHighlight()
+            guard let textView, let layoutManager = textView.layoutManager else { return }
+            let full = NSRange(location: 0, length: textView.string.utf16.count)
+            let clipped = NSIntersectionRange(range, full)
+            guard clipped.length > 0 else { return }
+            layoutManager.addTemporaryAttribute(
+                .backgroundColor,
+                value: NativeReaderAppearance(theme: settings.theme).searchHighlight,
+                forCharacterRange: clipped
+            )
+            renderedSearchRange = clipped
+        }
+
+        private func reapplySearchHighlight() {
+            guard let range = renderedSearchRange else { return }
+            let preserved = range
+            renderedSearchRange = nil
+            applySearchHighlight(preserved)
+        }
+
+        private func clearSearchHighlight() {
+            if let range = renderedSearchRange,
+               let textView,
+               let layoutManager = textView.layoutManager
+            {
+                let full = NSRange(location: 0, length: textView.string.utf16.count)
+                let clipped = NSIntersectionRange(range, full)
+                if clipped.length > 0 {
+                    layoutManager.removeTemporaryAttribute(.backgroundColor, forCharacterRange: clipped)
+                }
+            }
+            renderedSearchRange = nil
+        }
+
+        private func jumpToPage(_ page: Int) {
+            guard settings.flow.isPaging, let scrollView, let textView else { return }
+            let count = max(1, textView.pageCount)
+            let target = min(max(page, 1), count) - 1
+            let height = max(1, scrollView.contentView.bounds.height)
+            scroll(to: CGFloat(target) * height, animated: true)
+            reportProgress()
         }
 
         private func isPositionForCurrentSection(_ position: ReadingPosition) -> Bool {
@@ -1165,6 +1323,7 @@ struct NativeReaderView: NSViewRepresentable {
                 }
                 renderedAnnotationRanges.append((annotation.id, range, annotation.kind))
             }
+            reapplySearchHighlight()
         }
 
         private func annotation(at location: Int) -> ReaderAnnotation? {
@@ -1293,6 +1452,7 @@ struct NativeReaderView: NSViewRepresentable {
             guard let textView else { return }
             clearSpeechRange()
             renderedAnnotationRanges.removeAll()
+            clearSearchHighlight()
             textView.textStorage?.setAttributedString(document.attributedText)
             currentSectionIndex = index
             requestedSectionIndex = index
