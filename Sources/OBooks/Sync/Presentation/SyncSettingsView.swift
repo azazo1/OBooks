@@ -16,6 +16,15 @@ struct SyncSettingsView: View {
 
     private var busy: Bool { sync.isSyncing || !sync.downloading.isEmpty }
     private var bound: Bool { sync.account != nil && !addingAccount }
+    private var selectedProfileID: Binding<String> {
+        Binding(
+            get: { appModel.workspace?.activeID ?? "" },
+            set: { newID in
+                guard let profile = appModel.profiles.first(where: { $0.id == newID }) else { return }
+                switchToProfile(profile)
+            }
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -28,10 +37,9 @@ struct SyncSettingsView: View {
                 if appModel.workspace != nil, !appModel.profiles.isEmpty {
                     AccountSwitcherSection(
                         profiles: appModel.profiles,
-                        activeID: appModel.workspace?.activeID,
+                        selectedID: selectedProfileID,
                         busy: busy,
                         hasSavedSession: appModel.hasSavedSession(for:),
-                        onSwitch: switchToProfile,
                         onAdd: beginAddingAccount,
                         addingAccount: addingAccount
                     )
