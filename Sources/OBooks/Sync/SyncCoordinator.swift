@@ -17,8 +17,8 @@ final class SyncCoordinator: ObservableObject {
     @Published var deviceName: String
 
     private(set) var journal: SyncJournal
-    private let journalStore: SyncJournalStore
-    private let credentials: any SyncCredentialStorage
+    private var journalStore: SyncJournalStore
+    private var credentials: any SyncCredentialStorage
     private let logger = Logger(subsystem: "com.obooks.app", category: "sync")
     private weak var model: AppModel?
     private var api: SyncAPI?
@@ -28,6 +28,7 @@ final class SyncCoordinator: ObservableObject {
     private var monitor: NWPathMonitor?
     private var storageFailed = false
     private var automaticSync = true
+    private var observingLifecycle = false
     private var clockAnchor: (serverTime: TimeInterval, uptime: TimeInterval)?
 
     var account: SyncAccount? { journal.account }
@@ -65,7 +66,8 @@ final class SyncCoordinator: ObservableObject {
                 if isSignedIn { configureAPI(account.server) }
             } catch { report(error) }
         }
-        guard observeLifecycle else { return }
+        guard observeLifecycle, !observingLifecycle else { return }
+        observingLifecycle = true
         observations.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.schedule(delay: 0) }
         })
@@ -78,12 +80,45 @@ final class SyncCoordinator: ObservableObject {
         schedule(delay: 0)
     }
 
+    func rebind(rootURL: URL) {
+        scheduled?.cancel()
+        scheduled = nil
+        api = nil
+        isSignedIn = false
+        isSyncing = false
+        downloading = []
+        transferProgress = nil
+        lastError = nil
+        storageFailed = false
+        clockAnchor = nil
+        retryDelay = 2
+        journalStore = SyncJournalStore(rootURL: rootURL)
+        credentials = SyncCredentialStore(rootURL: rootURL)
+        do { journal = try journalStore.load() }
+        catch { journal = SyncJournal(); storageFailed = true; lastError = error.localizedDescription }
+        deviceName = journal.deviceName
+        lastSyncedAt = journal.lastSyncedAt
+        pendingCount = journal.pending.count
+        if let account = journal.account {
+            do {
+                isSignedIn = try credentials.read() != nil
+                if isSignedIn { configureAPI(account.server) }
+            } catch { report(error) }
+        } else {
+            status = "未登录"
+        }
+        if let model, !storageFailed, model.libraryStore.loadError == nil {
+            do { try applyRemote() } catch { storageFailed = true; report(error) }
+        }
+        if isSignedIn { schedule(delay: 0) }
+    }
+
     func login(server: String, username: String, password: String) async {
         guard !storageFailed, !isSyncing, downloading.isEmpty else { return }
         do {
             let url = try SyncAPI.validateServer(server)
             if let account = journal.account, account.server != url || account.username != username {
-                throw CloudSyncError.message("当前本地书库已绑定其他账号或服务器, 请使用原账号登录")
+                throw CloudSyncError.message("当前书库已绑定其他账号, 请先切换账号")
             }
             isSyncing = true
             status = "正在登录"

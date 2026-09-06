@@ -18,11 +18,13 @@ final class AppModel: ObservableObject {
     @Published var openBook: BookSummary?
     @Published var alert: AppAlert?
 
-    let libraryStore: LibraryStore
+    private(set) var libraryStore: LibraryStore
     let readingStats: ReadingStatsLedger
     let speechPlaybackOwner = SpeechPlaybackOwner()
     let sync: SyncCoordinator
-    private let readingStatsStore: ReadingStatsStore
+    let workspace: LibraryWorkspace?
+    @Published private(set) var copyStatus: String?
+    private var readingStatsStore: ReadingStatsStore
     private var readingStatsTracker: ReadingStatsTracker!
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
     private var readerWindows: [UUID: NSWindow] = [:]
@@ -31,10 +33,22 @@ final class AppModel: ObservableObject {
     private var terminationObservation: NSObjectProtocol?
 
     init(rootURL: URL? = nil, credentials: (any SyncCredentialStorage)? = nil, observeLifecycle: Bool = true) {
-        let store = LibraryStore(rootURL: rootURL)
+        let workspace: LibraryWorkspace?
+        let store: LibraryStore
+        if let rootURL {
+            workspace = nil
+            store = LibraryStore(rootURL: rootURL)
+        } else if let opened = try? LibraryWorkspace.openDefault() {
+            workspace = opened
+            store = LibraryStore(rootURL: opened.activeRoot)
+        } else {
+            workspace = nil
+            store = LibraryStore()
+        }
         let statsStore = ReadingStatsStore(rootURL: store.rootURL)
         let ledger = ReadingStatsLedger()
         ledger.replaceEvents(statsStore.loadEvents())
+        self.workspace = workspace
         libraryStore = store
         readingStatsStore = statsStore
         readingStats = ledger
@@ -43,7 +57,7 @@ final class AppModel: ObservableObject {
         readingStatsTracker = ReadingStatsTracker(ledger: ledger) { [weak self] in
             guard let self else { return }
             self.sync.localDataChanged()
-            statsStore.saveEvents(ledger.events)
+            self.readingStatsStore.saveEvents(self.readingStats.events)
         }
         sync.attach(to: self, observeLifecycle: observeLifecycle)
         guard observeLifecycle else { return }
@@ -384,5 +398,80 @@ final class AppModel: ObservableObject {
         guard libraryStore.save(books), readingStatsStore.saveEvents(events) else {
             throw CloudSyncError.message("无法保存同步结果")
         }
+    }
+
+    var localCopySources: [LibraryProfile] {
+        workspace?.sources(excluding: workspace?.activeID ?? "") ?? []
+    }
+
+    func loginToAccount(server: String, username: String, password: String) async {
+        do {
+            let url = try SyncAPI.validateServer(server)
+            try persistCurrentProfile()
+            if let workspace {
+                let profile = try workspace.ensureAccountProfile(server: url, username: username)
+                if profile.id != workspace.activeID {
+                    try switchProfile(to: profile.id)
+                }
+            }
+            await sync.login(server: server, username: username, password: password)
+            if let workspace, let account = sync.account {
+                try workspace.updateUserID(account.userID, for: workspace.activeID)
+            }
+        } catch {
+            alert = AppAlert(title: "登录失败", message: error.localizedDescription)
+        }
+    }
+
+    func copyFromLocalProfile(_ profile: LibraryProfile) {
+        guard let workspace else { return }
+        Task { @MainActor in
+            do {
+                persistLibrary()
+                var destBooks = books
+                var destEvents = readingStats.events
+                let result = try await LibraryCopy.merge(
+                    from: workspace.root(for: profile.id),
+                    into: libraryStore,
+                    destBooks: &destBooks,
+                    destEvents: &destEvents
+                ) { [weak self] message in
+                    self?.copyStatus = message
+                    self?.sync.status = message
+                }
+                books = destBooks
+                readingStats.replaceEvents(destEvents)
+                persistLibrary()
+                copyStatus = nil
+                logger.info("已从 \(profile.title, privacy: .public) 复制: added=\(result.added), merged=\(result.merged)")
+            } catch {
+                copyStatus = nil
+                logger.error("复制书库失败: \(error.localizedDescription, privacy: .public)")
+                alert = AppAlert(title: "复制失败", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func persistCurrentProfile() throws {
+        progressSaveTask?.cancel()
+        readingStatsTracker.flush()
+        sync.localDataChanged()
+        guard libraryStore.save(books), readingStatsStore.saveEvents(readingStats.events) else {
+            throw CloudSyncError.message("无法保存当前书库")
+        }
+    }
+
+    private func switchProfile(to profileID: String) throws {
+        guard let workspace else { throw CloudSyncError.message("当前运行没有书库工作区") }
+        for id in Array(readerWindows.keys) { closeReader(for: id) }
+        selectedBookID = nil
+        openBook = nil
+        try workspace.setActive(profileID)
+        libraryStore = LibraryStore(rootURL: workspace.activeRoot)
+        readingStatsStore = ReadingStatsStore(rootURL: workspace.activeRoot)
+        books = libraryStore.load()
+        readingStats.replaceEvents(readingStatsStore.loadEvents())
+        sync.rebind(rootURL: workspace.activeRoot)
+        objectWillChange.send()
     }
 }

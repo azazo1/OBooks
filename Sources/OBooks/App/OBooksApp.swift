@@ -49,7 +49,7 @@ struct OBooksApp: App {
         .defaultPosition(.center)
 
         Settings {
-            SyncSettingsView(sync: appModel.sync)
+            SyncSettingsView(appModel: appModel)
         }
     }
 }
