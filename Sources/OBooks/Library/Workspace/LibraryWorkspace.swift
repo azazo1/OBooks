@@ -105,6 +105,25 @@ final class LibraryWorkspace {
         try persist()
     }
 
+    func removeAccountProfile(_ profileID: String) throws {
+        guard profileID != LibraryProfile.unboundID else {
+            throw CloudSyncError.message("未绑定书库不能删除")
+        }
+        guard snapshot.activeID != profileID else {
+            throw CloudSyncError.message("不能删除当前正在使用的书库")
+        }
+        guard snapshot.profiles.contains(where: { $0.id == profileID }) else {
+            throw CloudSyncError.message("找不到本地书库")
+        }
+        snapshot.profiles.removeAll { $0.id == profileID }
+        try persist()
+        let directory = root(for: profileID)
+        if fileManager.fileExists(atPath: directory.path) {
+            try fileManager.removeItem(at: directory)
+        }
+        Logger(subsystem: "com.obooks.app", category: "library.workspace").info("已删除本机账号书库: \(profileID, privacy: .public)")
+    }
+
     func sources(excluding active: String) -> [LibraryProfile] {
         snapshot.profiles.filter { $0.id != active }.filter { profile in
             let store = LibraryStore(rootURL: root(for: profile.id))

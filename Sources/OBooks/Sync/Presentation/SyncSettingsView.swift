@@ -7,6 +7,7 @@ struct SyncSettingsView: View {
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
+    @State private var confirmingDelete = false
 
     init(appModel: AppModel) {
         _appModel = ObservedObject(wrappedValue: appModel)
@@ -17,6 +18,12 @@ struct SyncSettingsView: View {
     private var bound: Bool { sync.account != nil }
     private var editAction: (() -> Void)? {
         sync.isSignedIn ? { [self] in openForm(.edit) } : nil
+    }
+    private var removableProfile: LibraryProfile? {
+        appModel.workspace?.activeProfile.flatMap { $0.isUnbound ? nil : $0 }
+    }
+    private var removeAction: (() -> Void)? {
+        removableProfile == nil ? nil : { confirmingDelete = true }
     }
     private var selectedProfileID: Binding<String> {
         Binding(
@@ -43,7 +50,8 @@ struct SyncSettingsView: View {
                         busy: busy,
                         hasSavedSession: appModel.hasSavedSession(for:),
                         onAdd: { openForm(.add) },
-                        onEdit: editAction
+                        onEdit: editAction,
+                        onRemove: removeAction
                     )
                 }
                 currentAccountForm
@@ -80,6 +88,22 @@ struct SyncSettingsView: View {
         .onAppear { fillFromAccount() }
         .onChange(of: appModel.workspace?.activeID ?? "") { _, _ in
             fillFromAccount()
+        }
+        .confirmationDialog(
+            "删除本机账号",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("删除本机账号", role: .destructive) {
+                guard let profile = removableProfile else { return }
+                Task {
+                    await appModel.removeLocalAccount(profile)
+                    fillFromAccount()
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将从这台电脑删除 " + (removableProfile?.title ?? "该账号") + " 的书库和登录状态, 云端账号不会删除.")
         }
     }
 

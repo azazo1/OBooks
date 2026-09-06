@@ -528,6 +528,31 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    func removeLocalAccount(_ profile: LibraryProfile) async {
+        accountActionError = nil
+        do {
+            guard let workspace else { throw CloudSyncError.message("当前运行没有书库工作区") }
+            guard !profile.isUnbound else { throw CloudSyncError.message("未绑定书库不能删除") }
+            guard !sync.isSyncing, sync.downloading.isEmpty else {
+                throw CloudSyncError.message("正在同步, 请稍后再删除账号")
+            }
+            progressSaveTask?.cancel()
+            let removingCurrent = profile.id == workspace.activeID
+            if removingCurrent {
+                if sync.isSignedIn { await sync.logout() }
+                try switchToProfileThrowing(LibraryProfile.unboundID, persistCurrent: false)
+            } else {
+                await revokeSavedSession(for: profile)
+            }
+            try workspace.removeAccountProfile(profile.id)
+            logger.info("已删除本机账号: \(profile.title, privacy: .public)")
+            objectWillChange.send()
+        } catch {
+            logger.error("删除本机账号失败: \(error.localizedDescription, privacy: .public)")
+            accountActionError = error.localizedDescription
+        }
+    }
+
     func copyFromLocalProfile(_ profile: LibraryProfile) {
         guard let workspace else { return }
         Task { @MainActor in
@@ -593,6 +618,18 @@ final class AppModel: ObservableObject {
         }
         logger.info("已保存账号: \(profile.title, privacy: .public)")
         if sync.isSignedIn { await sync.synchronize() }
+    }
+
+    private func revokeSavedSession(for profile: LibraryProfile) async {
+        guard let workspace, let server = profile.server else { return }
+        let credentials = SyncCredentialStore(rootURL: workspace.root(for: profile.id))
+        guard (try? credentials.read()) != nil else { return }
+        do {
+            try await SyncAPI(server: server, credentials: credentials).logout()
+        } catch {
+            logger.error("未能撤销本机账号会话: \(error.localizedDescription, privacy: .public)")
+            try? credentials.remove()
+        }
     }
 
     private func persistCurrentProfile() throws {

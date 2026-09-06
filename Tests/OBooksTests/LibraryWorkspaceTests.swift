@@ -64,6 +64,37 @@ final class LibraryWorkspaceTests: XCTestCase {
         XCTAssertNil(workspace.profile(server: server, username: "carol"))
     }
 
+    func testRemoveLocalAccountDeletesProfileAndKeepsOthers() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let server = URL(string: "http://127.0.0.1:1")!
+        let workspace = try LibraryWorkspace(baseURL: directory)
+        let alice = try seedAccount(workspace: workspace, server: server, username: "alice", title: "Alice Book", token: "alice-token")
+        let bob = try seedAccount(workspace: workspace, server: server, username: "bob", title: "Bob Book", token: "bob-token")
+        try workspace.setActive(alice.id)
+
+        let model = AppModel(workspace: workspace, observeLifecycle: false)
+        await model.removeLocalAccount(bob)
+        XCTAssertNil(model.accountActionError)
+        XCTAssertEqual(model.sync.account?.username, "alice")
+        XCTAssertTrue(model.sync.isSignedIn)
+        XCTAssertNil(workspace.profile(server: server, username: "bob"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.root(for: bob.id).path))
+        XCTAssertEqual(try SyncCredentialStore(rootURL: workspace.root(for: alice.id)).read(), "alice-token")
+
+        await model.removeLocalAccount(alice)
+        XCTAssertNil(model.accountActionError)
+        XCTAssertEqual(workspace.activeID, LibraryProfile.unboundID)
+        XCTAssertNil(model.sync.account)
+        XCTAssertNil(workspace.profile(server: server, username: "alice"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.root(for: alice.id).path))
+        XCTAssertTrue(workspace.profiles.contains(where: \.isUnbound))
+
+        await model.removeLocalAccount(try XCTUnwrap(workspace.activeProfile))
+        XCTAssertEqual(model.accountActionError, "未绑定书库不能删除")
+        XCTAssertEqual(workspace.activeID, LibraryProfile.unboundID)
+    }
+
     private func seedAccount(
         workspace: LibraryWorkspace,
         server: URL,

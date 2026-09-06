@@ -8,6 +8,7 @@ struct AccountSwitcherSection: View {
     let hasSavedSession: (LibraryProfile) -> Bool
     let onAdd: () -> Void
     let onEdit: (() -> Void)?
+    let onRemove: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -22,6 +23,10 @@ struct AccountSwitcherSection: View {
                 .disabled(busy)
             if let onEdit {
                 Button("编辑账号", action: onEdit)
+                    .disabled(busy)
+            }
+            if let onRemove {
+                Button("删除本机账号", role: .destructive, action: onRemove)
                     .disabled(busy)
             }
         }
