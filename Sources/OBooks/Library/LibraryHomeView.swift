@@ -8,8 +8,18 @@ struct LibraryHomeView: View {
     let onOpen: (BookSummary) -> Void
     let onImport: () -> Void
     let onDelete: (BookSummary) -> Void
+    let onRemoveLocalDownload: ((BookSummary) -> Void)?
     let onToggleFinished: (BookSummary) -> Void
     let onRemoveFromContinueReading: (BookSummary) -> Void
+
+    private var everywhereDeleteTitle: String {
+        onRemoveLocalDownload == nil ? "删除图书" : "从所有设备删除"
+    }
+
+    private func localDownloadRemoval(for book: BookSummary) -> (() -> Void)? {
+        guard let onRemoveLocalDownload, store.isDownloaded(book) else { return nil }
+        return { onRemoveLocalDownload(book) }
+    }
 
     private var continueBooks: [BookSummary] {
         books.filter { !$0.isHiddenFromContinueReading }.sorted { lhs, rhs in
@@ -37,6 +47,8 @@ struct LibraryHomeView: View {
                                         book: book,
                                         store: store,
                                         onDelete: { onDelete(book) },
+                                        deleteTitle: everywhereDeleteTitle,
+                                        onRemoveLocalDownload: localDownloadRemoval(for: book),
                                         onToggleFinished: { onToggleFinished(book) },
                                         onRemoveFromContinueReading: { onRemoveFromContinueReading(book) }
                                     ) { onOpen(book) }
@@ -59,6 +71,8 @@ struct LibraryHomeView: View {
                                         book: book,
                                         store: store,
                                         onDelete: { onDelete(book) },
+                                        deleteTitle: everywhereDeleteTitle,
+                                        onRemoveLocalDownload: localDownloadRemoval(for: book),
                                         onToggleFinished: { onToggleFinished(book) }
                                     ) { onOpen(book) }
                                 }
@@ -85,6 +99,8 @@ struct LibraryHomeView: View {
                                     book: book,
                                     store: store,
                                     onDelete: { onDelete(book) },
+                                    deleteTitle: everywhereDeleteTitle,
+                                    onRemoveLocalDownload: localDownloadRemoval(for: book),
                                     onToggleFinished: { onToggleFinished(book) }
                                 ) { onOpen(book) }
                             }
@@ -208,6 +224,8 @@ private struct ContinueBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    var deleteTitle: String = "删除图书"
+    var onRemoveLocalDownload: (() -> Void)? = nil
     let onToggleFinished: () -> Void
     let onRemoveFromContinueReading: () -> Void
     let action: () -> Void
@@ -287,6 +305,8 @@ private struct ContinueBookCard: View {
                 isFinished: book.isFinished,
                 onToggleFinished: onToggleFinished,
                 onDelete: onDelete,
+                deleteTitle: deleteTitle,
+                onRemoveLocalDownload: onRemoveLocalDownload,
                 onRemoveFromContinueReading: onRemoveFromContinueReading
             )
             .padding(6)
@@ -295,6 +315,8 @@ private struct ContinueBookCard: View {
             isFinished: book.isFinished,
             onToggleFinished: onToggleFinished,
             onDelete: onDelete,
+            deleteTitle: deleteTitle,
+            onRemoveLocalDownload: onRemoveLocalDownload,
             onRemoveFromContinueReading: onRemoveFromContinueReading
         )
     }
@@ -304,6 +326,8 @@ private struct PreviousBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    var deleteTitle: String = "删除图书"
+    var onRemoveLocalDownload: (() -> Void)? = nil
     let onToggleFinished: () -> Void
     let action: () -> Void
 
@@ -328,14 +352,18 @@ private struct PreviousBookCard: View {
             BookActionMenu(
                 isFinished: book.isFinished,
                 onToggleFinished: onToggleFinished,
-                onDelete: onDelete
+                onDelete: onDelete,
+                deleteTitle: deleteTitle,
+                onRemoveLocalDownload: onRemoveLocalDownload
             )
             .padding(6)
         }
         .bookContextMenu(
             isFinished: book.isFinished,
             onToggleFinished: onToggleFinished,
-            onDelete: onDelete
+            onDelete: onDelete,
+            deleteTitle: deleteTitle,
+            onRemoveLocalDownload: onRemoveLocalDownload
         )
     }
 }
@@ -344,6 +372,8 @@ private struct CompactBookCard: View {
     let book: BookSummary
     let store: LibraryStore
     let onDelete: () -> Void
+    var deleteTitle: String = "删除图书"
+    var onRemoveLocalDownload: (() -> Void)? = nil
     let onToggleFinished: () -> Void
     let action: () -> Void
 
@@ -369,7 +399,9 @@ private struct CompactBookCard: View {
                 BookActionMenu(
                     isFinished: book.isFinished,
                     onToggleFinished: onToggleFinished,
-                    onDelete: onDelete
+                    onDelete: onDelete,
+                    deleteTitle: deleteTitle,
+                    onRemoveLocalDownload: onRemoveLocalDownload
                 )
                 .frame(width: 34, height: 34)
             }
@@ -378,7 +410,9 @@ private struct CompactBookCard: View {
         .bookContextMenu(
             isFinished: book.isFinished,
             onToggleFinished: onToggleFinished,
-            onDelete: onDelete
+            onDelete: onDelete,
+            deleteTitle: deleteTitle,
+            onRemoveLocalDownload: onRemoveLocalDownload
         )
     }
 }

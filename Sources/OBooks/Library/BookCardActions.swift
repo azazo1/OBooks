@@ -14,12 +14,23 @@ struct FinishBookMenuItem: View {
     }
 }
 
+struct RemoveLocalDownloadMenuItem: View {
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            Label("删除本机文件", systemImage: "internaldrive")
+        }
+    }
+}
+
 struct DeleteBookMenuItem: View {
+    var title: String = "删除图书"
     let onDelete: () -> Void
 
     var body: some View {
         Button(role: .destructive, action: onDelete) {
-            Label("删除图书", systemImage: "trash")
+            Label(title, systemImage: "trash")
         }
     }
 }
@@ -34,20 +45,44 @@ struct RemoveFromContinueReadingMenuItem: View {
     }
 }
 
+@ViewBuilder
+private func bookActionMenuContent(
+    isFinished: Bool,
+    onToggleFinished: @escaping () -> Void,
+    onDelete: @escaping () -> Void,
+    deleteTitle: String = "删除图书",
+    onRemoveLocalDownload: (() -> Void)? = nil,
+    onRemoveFromContinueReading: (() -> Void)? = nil
+) -> some View {
+    FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
+    if let onRemoveFromContinueReading {
+        RemoveFromContinueReadingMenuItem(onRemove: onRemoveFromContinueReading)
+    }
+    Divider()
+    if let onRemoveLocalDownload {
+        RemoveLocalDownloadMenuItem(onRemove: onRemoveLocalDownload)
+    }
+    DeleteBookMenuItem(title: deleteTitle, onDelete: onDelete)
+}
+
 struct BookActionMenu: View {
     let isFinished: Bool
     let onToggleFinished: () -> Void
     let onDelete: () -> Void
+    var deleteTitle: String = "删除图书"
+    var onRemoveLocalDownload: (() -> Void)? = nil
     var onRemoveFromContinueReading: (() -> Void)? = nil
 
     var body: some View {
         Menu {
-            FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
-            if let onRemoveFromContinueReading {
-                RemoveFromContinueReadingMenuItem(onRemove: onRemoveFromContinueReading)
-            }
-            Divider()
-            DeleteBookMenuItem(onDelete: onDelete)
+            bookActionMenuContent(
+                isFinished: isFinished,
+                onToggleFinished: onToggleFinished,
+                onDelete: onDelete,
+                deleteTitle: deleteTitle,
+                onRemoveLocalDownload: onRemoveLocalDownload,
+                onRemoveFromContinueReading: onRemoveFromContinueReading
+            )
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .bold))
@@ -69,14 +104,19 @@ extension View {
         isFinished: Bool,
         onToggleFinished: @escaping () -> Void,
         onDelete: @escaping () -> Void,
+        deleteTitle: String = "删除图书",
+        onRemoveLocalDownload: (() -> Void)? = nil,
         onRemoveFromContinueReading: (() -> Void)? = nil
     ) -> some View {
         contextMenu {
-            FinishBookMenuItem(isFinished: isFinished, onToggleFinished: onToggleFinished)
-            if let onRemoveFromContinueReading {
-                RemoveFromContinueReadingMenuItem(onRemove: onRemoveFromContinueReading)
-            }
-            DeleteBookMenuItem(onDelete: onDelete)
+            bookActionMenuContent(
+                isFinished: isFinished,
+                onToggleFinished: onToggleFinished,
+                onDelete: onDelete,
+                deleteTitle: deleteTitle,
+                onRemoveLocalDownload: onRemoveLocalDownload,
+                onRemoveFromContinueReading: onRemoveFromContinueReading
+            )
         }
     }
 }

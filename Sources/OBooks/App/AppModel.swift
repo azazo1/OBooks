@@ -150,6 +150,33 @@ final class AppModel: ObservableObject {
         logger.info("删除完成: title=\(book.title, privacy: .public)")
     }
 
+    func removeLocalDownload(_ book: BookSummary) {
+        guard let current = books.first(where: { $0.id == book.id }),
+              let canonicalID = current.canonicalID,
+              libraryStore.isDownloaded(current) else { return }
+        if sync.downloading.contains(current.id) {
+            alert = AppAlert(title: "无法删除本机文件", message: "这本书正在下载")
+            return
+        }
+
+        readingStatsTracker.stop(bookID: current.id)
+        progressSaveTask?.cancel()
+        closeReader(for: current.id)
+        if openBook?.id == current.id {
+            openBook = nil
+        }
+        do {
+            try libraryStore.deleteBookData(for: current)
+        } catch {
+            logger.error("删除本机文件失败: title=\(current.title, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
+            alert = AppAlert(title: "文件清理失败", message: error.localizedDescription)
+            return
+        }
+        NotificationCenter.default.post(name: .bookAssetsChanged, object: canonicalID)
+        objectWillChange.send()
+        logger.info("已删除本机文件: title=\(current.title, privacy: .public)")
+    }
+
     func openSelectedBook() {
         guard let selectedBookID,
               let book = books.first(where: { $0.id == selectedBookID }) else {

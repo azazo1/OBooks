@@ -123,6 +123,45 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(projection.removed, [book])
     }
 
+    @MainActor
+    func testRemoveLocalDownloadKeepsRemoteBook() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source")
+        try writeArchiveFixture(source)
+        try Data("<container><rootfiles><rootfile full-path=\"content.opf\"/></rootfiles></container>".utf8).write(to: source.appendingPathComponent("META-INF/container.xml"))
+        try Data("<package><metadata><title>Local Only</title></metadata><manifest><item id=\"chapter\" href=\"chapter.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"chapter\"/></spine></package>".utf8).write(to: source.appendingPathComponent("content.opf"))
+        let epub = directory.appendingPathComponent("book.epub")
+        try BookArchive.pack(folderURL: source, archiveURL: epub)
+        let root = directory.appendingPathComponent("library")
+        let store = LibraryStore(rootURL: root)
+        let imported = try EPUBImporter(store: store).importBook(from: epub)
+        XCTAssertTrue(store.save([imported]))
+        let cover = store.cachedCoverURL(for: try XCTUnwrap(imported.canonicalID))
+        try FileManager.default.createDirectory(at: cover.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("cover".utf8).write(to: cover)
+        let model = AppModel(rootURL: root, observeLifecycle: false)
+        let book = try XCTUnwrap(model.books.first(where: { $0.id == imported.id }))
+        XCTAssertTrue(model.libraryStore.isDownloaded(book))
+        model.readingStats.record(bookID: book.id, from: Date(), duration: 30, calendar: .current)
+        XCTAssertFalse(model.readingStats.events.filter { $0.bookID == book.id }.isEmpty)
+
+        model.removeLocalDownload(book)
+
+        let remaining = try XCTUnwrap(model.books.first(where: { $0.id == book.id }))
+        XCTAssertFalse(model.libraryStore.isDownloaded(remaining))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: model.libraryStore.archiveURL(for: remaining).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cover.path))
+        XCTAssertFalse(model.readingStats.events.filter { $0.bookID == book.id }.isEmpty)
+        XCTAssertFalse(model.sync.journal.pending.contains(where: { $0.entity == "book" && $0.deletedAt != nil }))
+        XCTAssertEqual(LibraryStore(rootURL: root).load().count, 1)
+
+        model.delete(remaining)
+        XCTAssertFalse(model.books.contains(where: { $0.id == book.id }))
+        XCTAssertTrue(model.readingStats.events.filter { $0.bookID == book.id }.isEmpty)
+        XCTAssertTrue(model.sync.journal.pending.contains(where: { $0.entity == "book" && $0.deletedAt != nil && $0.bookID == remaining.canonicalID }))
+    }
+
     func testLocalEditDuringPagedPullDoesNotDeleteUnseenRemoteNote() {
         var book = makeBook()
         book.canonicalID = canonicalID

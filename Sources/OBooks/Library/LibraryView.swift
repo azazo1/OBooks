@@ -29,6 +29,11 @@ enum LibraryDestination: String, CaseIterable, Hashable, Identifiable {
     }
 }
 
+private enum PendingBookRemoval {
+    case local(BookSummary)
+    case everywhere(BookSummary)
+}
+
 enum OBooksPalette {
     static let window = Color(red: 0.105, green: 0.105, blue: 0.105)
     static let sidebar = Color(red: 0.125, green: 0.125, blue: 0.115)
@@ -46,8 +51,12 @@ struct LibraryView: View {
     @State private var destination: LibraryDestination = .home
     @State private var query = ""
     @State private var isDropTargeted = false
-    @State private var bookPendingDeletion: BookSummary?
+    @State private var pendingRemoval: PendingBookRemoval?
     @FocusState private var searchFocused: Bool
+
+    private var everywhereDeleteTitle: String {
+        appModel.sync.account == nil ? "删除图书" : "从所有设备删除"
+    }
 
     private var visibleBooks: [BookSummary] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -83,7 +92,8 @@ struct LibraryView: View {
                     stats: appModel.readingStats,
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
-                    onDelete: requestDelete,
+                    onDelete: requestDeleteEverywhere,
+                    onRemoveLocalDownload: appModel.sync.account == nil ? nil : requestDeleteLocal,
                     onToggleFinished: { appModel.toggleFinished(for: $0.id) },
                     onRemoveFromContinueReading: { appModel.removeFromContinueReading(for: $0.id) }
                 )
@@ -94,7 +104,8 @@ struct LibraryView: View {
                     store: appModel.libraryStore,
                     onOpen: appModel.open,
                     onImport: appModel.importEPUB,
-                    onDelete: requestDelete,
+                    onDelete: requestDeleteEverywhere,
+                    onRemoveLocalDownload: appModel.sync.account == nil ? nil : requestDeleteLocal,
                     onToggleFinished: { appModel.toggleFinished(for: $0.id) }
                 )
             }
@@ -132,32 +143,63 @@ struct LibraryView: View {
             Text(appModel.alert?.message ?? "")
         }
         .confirmationDialog(
-            "删除图书",
+            pendingRemovalTitle,
             isPresented: Binding(
-                get: { bookPendingDeletion != nil },
+                get: { pendingRemoval != nil },
                 set: { isPresented in
-                    if !isPresented { bookPendingDeletion = nil }
+                    if !isPresented { pendingRemoval = nil }
                 }
             ),
             titleVisibility: .visible
         ) {
-            Button("删除", role: .destructive) {
-                guard let book = bookPendingDeletion else { return }
-                bookPendingDeletion = nil
-                appModel.delete(book)
+            switch pendingRemoval {
+            case .local(let book):
+                Button("删除本机文件", role: .destructive) {
+                    pendingRemoval = nil
+                    appModel.removeLocalDownload(book)
+                }
+            case .everywhere(let book):
+                Button(everywhereDeleteTitle == "删除图书" ? "删除" : everywhereDeleteTitle, role: .destructive) {
+                    pendingRemoval = nil
+                    appModel.delete(book)
+                }
+            case nil:
+                EmptyView()
             }
             Button("取消", role: .cancel) {
-                bookPendingDeletion = nil
+                pendingRemoval = nil
             }
         } message: {
-            Text(appModel.sync.account == nil
-                ? "确定删除 \(bookPendingDeletion?.title ?? "这本书") 及其本地文件"
-                : "确定从所有设备删除 \(bookPendingDeletion?.title ?? "这本书"), 标注和阅读统计")
+            Text(pendingRemovalMessage)
         }
     }
 
-    private func requestDelete(_ book: BookSummary) {
-        bookPendingDeletion = book
+    private var pendingRemovalTitle: String {
+        switch pendingRemoval {
+        case .local: return "删除本机文件"
+        case .everywhere, nil: return "删除图书"
+        }
+    }
+
+    private var pendingRemovalMessage: String {
+        switch pendingRemoval {
+        case .local(let book):
+            return "确定删除本机上的 \(book.title) 文件? 云端副本, 标注和阅读进度会保留, 需要时可重新下载"
+        case .everywhere(let book):
+            return appModel.sync.account == nil
+                ? "确定删除 \(book.title) 及其本地文件"
+                : "确定从所有设备删除 \(book.title), 标注和阅读统计"
+        case nil:
+            return ""
+        }
+    }
+
+    private func requestDeleteLocal(_ book: BookSummary) {
+        pendingRemoval = .local(book)
+    }
+
+    private func requestDeleteEverywhere(_ book: BookSummary) {
+        pendingRemoval = .everywhere(book)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
