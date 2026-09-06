@@ -94,7 +94,7 @@ private struct SpeechPlayerDragContainer<Content: View>: View {
     private func playerOrigin(container: CGSize, size: CGSize) -> CGPoint {
         CGPoint(
             x: min(max(16, (container.width - size.width) / 2 + offset.width + translation.width), container.width - size.width - 16),
-            y: min(max(60, container.height - size.height - 76 + offset.height + translation.height), container.height - size.height - 64)
+            y: min(max(16, container.height - size.height - 76 + offset.height + translation.height), container.height - size.height - 16)
         )
     }
 
@@ -109,7 +109,7 @@ private struct SpeechPlayerDragContainer<Content: View>: View {
                 }
                 .onEnded { value in
                     let x = min(max(16, (container.width - size.width) / 2 + offset.width + value.translation.width), container.width - size.width - 16)
-                    let y = min(max(60, container.height - size.height - 76 + offset.height + value.translation.height), container.height - size.height - 64)
+                    let y = min(max(16, container.height - size.height - 76 + offset.height + value.translation.height), container.height - size.height - 16)
                     offset = CGSize(width: x - (container.width - size.width) / 2, height: y - (container.height - size.height - 76))
                 })
             .help("移动朗读播放器")
