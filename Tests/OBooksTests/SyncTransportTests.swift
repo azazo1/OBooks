@@ -39,7 +39,7 @@ final class SyncTransportTests: XCTestCase {
         let remote = try XCTUnwrap(b.books.first(where: { $0.canonicalID == imported.canonicalID }))
         XCTAssertFalse(b.libraryStore.isDownloaded(remote))
         let downloaded = await b.sync.download(remote)
-        XCTAssertTrue(downloaded, b.sync.lastError ?? "")
+        XCTAssertEqual(downloaded, .success, b.sync.lastError ?? "")
         XCTAssertTrue(b.libraryStore.isDownloaded(remote))
         let note = ReaderAnnotation(text: "原文", kind: "note", sectionIndex: 0, range: NSRange(location: 0, length: 3))
         a.updateAnnotations(bookID: imported.id, annotations: [note])

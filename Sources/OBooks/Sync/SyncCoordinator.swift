@@ -14,6 +14,7 @@ final class SyncCoordinator: ObservableObject {
     @Published private(set) var pendingCount = 0
     @Published private(set) var lastSyncedAt: Date?
     @Published private(set) var downloading: Set<UUID> = []
+    @Published private(set) var downloadProgress: [UUID: Double] = [:]
     @Published var deviceName: String
 
     private(set) var journal: SyncJournal
@@ -30,6 +31,7 @@ final class SyncCoordinator: ObservableObject {
     private var automaticSync = true
     private var observingLifecycle = false
     private var clockAnchor: (serverTime: TimeInterval, uptime: TimeInterval)?
+    private var downloadTasks: [UUID: Task<CloudDownloadOutcome, Never>] = [:]
 
     var account: SyncAccount? { journal.account }
     var now: Date {
@@ -83,11 +85,10 @@ final class SyncCoordinator: ObservableObject {
     func rebind(rootURL: URL) {
         scheduled?.cancel()
         scheduled = nil
+        cancelAllDownloads()
         api = nil
         isSignedIn = false
         isSyncing = false
-        downloading = []
-        transferProgress = nil
         lastError = nil
         storageFailed = false
         clockAnchor = nil
@@ -185,10 +186,10 @@ final class SyncCoordinator: ObservableObject {
         } else {
             try? credentials.remove()
         }
+        cancelAllDownloads()
         api = nil
         isSignedIn = false
         isSyncing = false
-        transferProgress = nil
         status = "未登录"
         lastError = nil
     }
@@ -267,39 +268,112 @@ final class SyncCoordinator: ObservableObject {
         }
     }
 
-    func download(_ book: BookSummary) async -> Bool {
+    func download(_ book: BookSummary) async -> CloudDownloadOutcome {
+        if let existing = downloadTasks[book.id] { return await existing.value }
         guard let api, isSignedIn, let model, let canonicalID = book.canonicalID else {
-            report(CloudSyncError.message("请登录后下载图书")); return false
+            report(CloudSyncError.message("请登录后下载图书"))
+            return .failed
         }
-        guard downloading.insert(book.id).inserted else { return false }
-        defer { downloading.remove(book.id); transferProgress = nil }
-        do {
-            status = "正在下载 " + book.title
-            let temporary = try await api.download(bookID: canonicalID, kind: "content", progress: progressHandler())
-            defer { try? FileManager.default.removeItem(at: temporary) }
-            let store = model.libraryStore
-            let staging = store.rootURL.appendingPathComponent("download-" + UUID().uuidString, isDirectory: true)
-            defer { try? FileManager.default.removeItem(at: staging) }
-            try await Task.detached(priority: .utility) {
-                _ = try BookArchive.unpack(archiveURL: temporary, destination: staging, expectedID: canonicalID)
-                _ = try EPUBParser().parse(folderURL: staging)
-            }.value
-            guard model.books.contains(where: { $0.id == book.id }) else { return false }
-            if FileManager.default.fileExists(atPath: book.folderURL.path) { try FileManager.default.removeItem(at: book.folderURL) }
-            try FileManager.default.moveItem(at: staging, to: book.folderURL)
-            try store.preserveArchive(temporary, for: book)
-            NotificationCenter.default.post(name: .bookAssetsChanged, object: canonicalID)
-            model.objectWillChange.send()
-            status = "已下载"
-            return true
-        } catch { report(error); return false }
+        let task = Task { @MainActor in
+            await self.performDownload(book, canonicalID: canonicalID, api: api, model: model)
+        }
+        downloadTasks[book.id] = task
+        downloading.insert(book.id)
+        let outcome = await task.value
+        downloadTasks[book.id] = nil
+        downloading.remove(book.id)
+        downloadProgress[book.id] = nil
+        transferProgress = nil
+        return outcome
+    }
+
+    func cancelDownload(_ bookID: UUID) {
+        downloadTasks[bookID]?.cancel()
     }
 
     func downloadAll() async {
         guard let model else { return }
         for book in model.books where !model.libraryStore.isDownloaded(book) {
-            if !(await download(book)) { break }
+            if await download(book) != .success { break }
         }
+    }
+
+    private func performDownload(_ book: BookSummary, canonicalID: String, api: SyncAPI, model: AppModel) async -> CloudDownloadOutcome {
+        let resumable = ResumableDownload.content(rootURL: model.libraryStore.rootURL, bookID: canonicalID)
+        do {
+            status = "正在下载 " + book.title
+            lastError = nil
+            let info = try await api.fileInfo(bookID: canonicalID, kind: "content")
+            guard info.exists else { throw CloudSyncError.message("文件尚未上传") }
+            let offset = try resumable.prepare(remoteETag: info.etag, remoteSize: info.size)
+            if let size = info.size, size > 0, offset > 0 {
+                let fraction = min(max(Double(offset) / Double(size), 0), 1)
+                downloadProgress[book.id] = fraction
+                transferProgress = fraction
+            }
+            logger.info("开始下载: title=\(book.title, privacy: .public), offset=\(offset), size=\(info.size ?? -1)")
+            let alreadyComplete = if let size = info.size { offset > 0 && offset >= size } else { false }
+            if !alreadyComplete {
+                let handle = try resumable.openHandle(reset: offset == 0)
+                defer { try? handle.close() }
+                if let etag = info.etag {
+                    try resumable.saveSidecar(.init(etag: etag, expectedSize: info.size))
+                }
+                let result = try await api.downloadFile(
+                    bookID: canonicalID,
+                    kind: "content",
+                    rangeStart: offset,
+                    to: handle,
+                    existingBytes: offset,
+                    progress: downloadProgressHandler(for: book.id)
+                )
+                try Task.checkCancellation()
+                if let etag = result.etag ?? info.etag {
+                    try resumable.saveSidecar(.init(etag: etag, expectedSize: result.expectedSize ?? info.size))
+                }
+                logger.info("下载写入完成: title=\(book.title, privacy: .public), bytes=\(result.bytesWritten), status=\(result.statusCode)")
+            }
+            let archive = resumable.partialURL
+            let store = model.libraryStore
+            let staging = store.rootURL.appendingPathComponent("download-" + UUID().uuidString, isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: staging) }
+            try await Task.detached(priority: .utility) {
+                _ = try BookArchive.unpack(archiveURL: archive, destination: staging, expectedID: canonicalID)
+                _ = try EPUBParser().parse(folderURL: staging)
+            }.value
+            try Task.checkCancellation()
+            guard model.books.contains(where: { $0.id == book.id }) else { return .cancelled }
+            if FileManager.default.fileExists(atPath: book.folderURL.path) { try FileManager.default.removeItem(at: book.folderURL) }
+            try FileManager.default.moveItem(at: staging, to: book.folderURL)
+            try store.preserveArchive(archive, for: book)
+            try resumable.remove()
+            NotificationCenter.default.post(name: .bookAssetsChanged, object: canonicalID)
+            model.objectWillChange.send()
+            status = "已下载"
+            logger.info("下载完成: title=\(book.title, privacy: .public)")
+            return .success
+        } catch is CancellationError {
+            logger.info("用户取消下载: title=\(book.title, privacy: .public)")
+            status = "已同步"
+            return .cancelled
+        } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled {
+                logger.info("用户取消下载: title=\(book.title, privacy: .public)")
+                status = "已同步"
+                return .cancelled
+            }
+            report(error)
+            return .failed
+        }
+    }
+
+    private func cancelAllDownloads() {
+        let tasks = downloadTasks
+        downloadTasks = [:]
+        downloading = []
+        downloadProgress = [:]
+        transferProgress = nil
+        tasks.values.forEach { $0.cancel() }
     }
 
     private func configureAPI(_ server: URL) {
@@ -402,6 +476,24 @@ final class SyncCoordinator: ObservableObject {
     private func progressHandler() -> @Sendable (Double) -> Void {
         { [weak self] fraction in
             Task { @MainActor in self?.transferProgress = min(max(fraction, 0), 1) }
+        }
+    }
+
+    private func downloadProgressHandler(for bookID: UUID) -> @Sendable (Int64, Int64?) -> Void {
+        { [weak self] received, total in
+            let fraction: Double?
+            if let total, total > 0 {
+                fraction = min(max(Double(received) / Double(total), 0), 1)
+            } else {
+                fraction = nil
+            }
+            Task { @MainActor in
+                guard let self, self.downloading.contains(bookID) else { return }
+                guard let fraction else { return }
+                if let last = self.downloadProgress[bookID], fraction < 1, abs(last - fraction) < 0.01 { return }
+                self.downloadProgress[bookID] = fraction
+                self.transferProgress = fraction
+            }
         }
     }
 

@@ -98,6 +98,9 @@ final class LibraryStore {
         }
         let archive = archiveURL(for: book)
         if fileManager.fileExists(atPath: archive.path) { try fileManager.removeItem(at: archive) }
+        if let id = book.canonicalID {
+            try ResumableDownload.content(rootURL: rootURL, bookID: id).remove()
+        }
     }
 
     func coverImage(for book: BookSummary) -> NSImage? {

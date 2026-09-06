@@ -108,15 +108,22 @@ final class SyncAPI {
         return try await request("v1/sync/push", method: "POST", body: SyncCoding.encoder().encode(Push(changes: changes)))
     }
 
-    func fileExists(bookID: String, kind: String) async throws -> Bool {
+    func fileInfo(bookID: String, kind: String) async throws -> CloudFileInfo {
         try await authorized { token in
             var request = self.makeRequest("v1/books/\(bookID)/\(kind)", method: "HEAD")
             request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
             let (data, response) = try await self.session.data(for: request)
-            if (response as? HTTPURLResponse)?.statusCode == 404 { return false }
+            if (response as? HTTPURLResponse)?.statusCode == 404 {
+                return CloudFileInfo(exists: false, size: nil, etag: nil)
+            }
             try self.check(response, data: data)
-            return true
+            let http = response as! HTTPURLResponse
+            return CloudFileInfo(exists: true, size: CloudHTTP.contentLength(http), etag: CloudHTTP.etag(http))
         }
+    }
+
+    func fileExists(bookID: String, kind: String) async throws -> Bool {
+        try await fileInfo(bookID: bookID, kind: kind).exists
     }
 
     func upload(_ file: URL, bookID: String, kind: String, progress: @escaping @Sendable (Double) -> Void) async throws {
@@ -138,6 +145,30 @@ final class SyncAPI {
             let (url, response) = try await self.session.download(for: request, delegate: delegate)
             do { try self.check(response, data: Data()) } catch { try? FileManager.default.removeItem(at: url); throw error }
             return url
+        }
+    }
+
+    func downloadFile(
+        bookID: String,
+        kind: String,
+        rangeStart: Int64,
+        to handle: FileHandle,
+        existingBytes: Int64,
+        progress: @escaping @Sendable (Int64, Int64?) -> Void
+    ) async throws -> CloudFileDownload {
+        try await authorized { token in
+            var request = self.makeRequest("v1/books/\(bookID)/\(kind)")
+            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            if rangeStart > 0 {
+                request.setValue("bytes=\(rangeStart)-", forHTTPHeaderField: "Range")
+            }
+            return try await SyncFileTransfer.download(
+                configuration: self.session.configuration,
+                request: request,
+                to: handle,
+                existingBytes: existingBytes,
+                progress: progress
+            )
         }
     }
 

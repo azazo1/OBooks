@@ -43,6 +43,18 @@ struct CloudProgress: Codable, Equatable {
     var lastOpenedAt: Date?
 }
 
+struct CloudFileInfo: Equatable {
+    var exists: Bool
+    var size: Int64?
+    var etag: String?
+}
+
+enum CloudDownloadOutcome: Equatable {
+    case success
+    case cancelled
+    case failed
+}
+
 struct ReadingEvent: Codable, Equatable, Identifiable {
     let id: UUID
     var bookID: UUID

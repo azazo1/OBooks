@@ -151,6 +151,7 @@ final class AppModel: ObservableObject {
 
         do {
             readingStatsTracker.stop(bookID: book.id)
+            sync.cancelDownload(book.id)
             try sync.deleteBook(book)
         } catch {
             logger.error("删除失败: title=\(book.title, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
@@ -218,10 +219,17 @@ final class AppModel: ObservableObject {
     func openReader(_ book: BookSummary) {
         guard libraryStore.isDownloaded(book) else {
             Task { @MainActor in
-                if await sync.download(book), let current = books.first(where: { $0.id == book.id }) {
-                    openReader(current)
-                } else if let error = sync.lastError {
-                    alert = AppAlert(title: "下载失败", message: error)
+                switch await sync.download(book) {
+                case .success:
+                    if let current = books.first(where: { $0.id == book.id }) {
+                        openReader(current)
+                    }
+                case .failed:
+                    if let error = sync.lastError {
+                        alert = AppAlert(title: "下载失败", message: error)
+                    }
+                case .cancelled:
+                    break
                 }
             }
             return

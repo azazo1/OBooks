@@ -420,8 +420,22 @@ private struct CompactBookCard: View {
 struct BookCoverImage: View {
     let book: BookSummary
     let store: LibraryStore
+    @EnvironmentObject private var appModel: AppModel
+
+    var body: some View {
+        BookCoverImageBody(book: book, store: store, sync: appModel.sync)
+    }
+}
+
+private struct BookCoverImageBody: View {
+    let book: BookSummary
+    let store: LibraryStore
+    @ObservedObject var sync: SyncCoordinator
     @State private var image: NSImage?
     @State private var isDownloaded = true
+    @State private var hoveringBadge = false
+
+    private var isDownloading: Bool { sync.downloading.contains(book.id) }
 
     var body: some View {
         Group {
@@ -442,14 +456,7 @@ struct BookCoverImage: View {
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 5))
         .overlay(alignment: .bottomTrailing) {
-            if !isDownloaded {
-                Image(systemName: "icloud.and.arrow.down")
-                    .font(.system(size: 14, weight: .semibold))
-                    .padding(6)
-                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
-                    .padding(5)
-                    .help("打开时下载")
-            }
+            coverDownloadBadge
         }
         .task(id: book.id) {
             image = store.coverImage(for: book)
@@ -459,6 +466,46 @@ struct BookCoverImage: View {
             guard notification.object as? String == book.canonicalID else { return }
             image = store.coverImage(for: book)
             isDownloaded = store.isDownloaded(book)
+        }
+        .onChange(of: isDownloading) { _, downloading in
+            if !downloading {
+                hoveringBadge = false
+                isDownloaded = store.isDownloaded(book)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var coverDownloadBadge: some View {
+        if isDownloading {
+            Button {
+                sync.cancelDownload(book.id)
+            } label: {
+                Group {
+                    if hoveringBadge {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 14, height: 14)
+                    } else {
+                        DownloadPieProgress(progress: sync.downloadProgress[book.id])
+                    }
+                }
+                .padding(6)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                .padding(5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(hoveringBadge ? "取消下载" : "正在下载")
+            .onHover { hoveringBadge = $0 }
+        } else if !isDownloaded {
+            Image(systemName: "icloud.and.arrow.down")
+                .font(.system(size: 14, weight: .semibold))
+                .padding(6)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                .padding(5)
+                .help("打开时下载")
         }
     }
 
@@ -471,5 +518,58 @@ struct BookCoverImage: View {
             Color(red: 0.39, green: 0.31, blue: 0.22),
         ]
         return colors[value % colors.count]
+    }
+}
+
+private struct DownloadPieProgress: View {
+    var progress: Double?
+    @State private var rotation = 0.0
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.white.opacity(0.22))
+            if let progress {
+                PieSlice(progress: min(max(progress, 0), 1))
+                    .fill(OBooksPalette.accent)
+            } else {
+                PieSlice(progress: 0.22)
+                    .fill(OBooksPalette.accent)
+                    .rotationEffect(.degrees(rotation))
+            }
+        }
+        .frame(width: 14, height: 14)
+        .onAppear {
+            guard progress == nil else { return }
+            rotation = 0
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+        }
+    }
+}
+
+private struct PieSlice: Shape {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        path.move(to: center)
+        path.addArc(
+            center: center,
+            radius: radius,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(-90 + 360 * progress),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
     }
 }
