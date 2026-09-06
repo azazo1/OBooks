@@ -8,9 +8,121 @@ struct SpeechPlayerOverlay: View {
     let theme: ReadingTheme
     let flow: ReaderFlowMode
     let onFrameChange: (CGRect) -> Void
-    @EnvironmentObject private var appModel: AppModel
     @State private var offset = CGSize.zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            if session.isPlayerVisible {
+                let size = CGSize(width: min(420, geometry.size.width - 32),
+                    height: session.isExpanded ? min(510, geometry.size.height * 0.8) : 84)
+                SpeechPlayerDragContainer(
+                    offset: $offset,
+                    container: geometry.size,
+                    size: size,
+                    theme: theme,
+                    onFrameChange: onFrameChange
+                ) {
+                    SpeechPlayerCard(
+                        session: session,
+                        controller: controller,
+                        book: book,
+                        theme: theme,
+                        flow: flow
+                    )
+                }
+            }
+        }
+        .coordinateSpace(name: "speechPlayerWindow")
+        .onChange(of: session.isPlayerVisible) { _, visible in
+            if !visible { onFrameChange(.zero) }
+        }
+    }
+}
+
+private struct SpeechPlayerDragContainer<Content: View>: View {
+    @Binding var offset: CGSize
+    let container: CGSize
+    let size: CGSize
+    let theme: ReadingTheme
+    let onFrameChange: (CGRect) -> Void
+    let content: Content
     @GestureState private var translation = CGSize.zero
+
+    init(
+        offset: Binding<CGSize>,
+        container: CGSize,
+        size: CGSize,
+        theme: ReadingTheme,
+        onFrameChange: @escaping (CGRect) -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        _offset = offset
+        self.container = container
+        self.size = size
+        self.theme = theme
+        self.onFrameChange = onFrameChange
+        self.content = content()
+    }
+
+    var body: some View {
+        let origin = playerOrigin(container: container, size: size)
+        VStack(spacing: 0) {
+            dragHandle
+            content
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color(nsColor: NativeReaderAppearance(theme: theme).background).opacity(0.98))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            SystemCursorBarrier()
+                .allowsHitTesting(false)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.15), lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .foregroundStyle(Color(nsColor: NativeReaderAppearance(theme: theme).foreground))
+        .preferredColorScheme(theme == .bold || theme == .focus ? .dark : .light)
+        .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+        .onChange(of: CGRect(origin: origin, size: size), initial: true) { _, frame in
+            guard translation == .zero else { return }
+            onFrameChange(frame)
+        }
+        .onChange(of: translation) { _, value in
+            if value == .zero { onFrameChange(CGRect(origin: origin, size: size)) }
+        }
+    }
+
+    private func playerOrigin(container: CGSize, size: CGSize) -> CGPoint {
+        CGPoint(
+            x: min(max(16, (container.width - size.width) / 2 + offset.width + translation.width), container.width - size.width - 16),
+            y: min(max(60, container.height - size.height - 76 + offset.height + translation.height), container.height - size.height - 64)
+        )
+    }
+
+    private var dragHandle: some View {
+        Capsule().fill(.secondary.opacity(0.35)).frame(width: 34, height: 3)
+            .frame(maxWidth: .infinity).frame(height: 20)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("speechPlayerWindow"))
+                .updating($translation) { value, state, transaction in
+                    transaction.disablesAnimations = true
+                    state = value.translation
+                }
+                .onEnded { value in
+                    let x = min(max(16, (container.width - size.width) / 2 + offset.width + value.translation.width), container.width - size.width - 16)
+                    let y = min(max(60, container.height - size.height - 76 + offset.height + value.translation.height), container.height - size.height - 64)
+                    offset = CGSize(width: x - (container.width - size.width) / 2, height: y - (container.height - size.height - 76))
+                })
+            .help("移动朗读播放器")
+    }
+}
+
+private struct SpeechPlayerCard: View {
+    @ObservedObject var session: SpeechSession
+    let controller: ReaderController
+    let book: BookSummary
+    let theme: ReadingTheme
+    let flow: ReaderFlowMode
+    @EnvironmentObject private var appModel: AppModel
     @State private var draftRate = 1.0
     @State private var voices: [SpeechVoice] = []
     private static let sleepPresets: [(seconds: TimeInterval, label: String)] = [
@@ -26,39 +138,8 @@ struct SpeechPlayerOverlay: View {
     ]
 
     var body: some View {
-        GeometryReader { geometry in
-            if session.isPlayerVisible {
-                let size = CGSize(width: min(420, geometry.size.width - 32),
-                    height: session.isExpanded ? min(510, geometry.size.height * 0.8) : 84)
-                let origin = playerOrigin(container: geometry.size, size: size)
-                VStack(spacing: 0) {
-                    dragHandle(container: geometry.size, size: size)
-                    if session.isExpanded { expandedPlayer } else { miniPlayer }
-                }
-                .frame(width: size.width, height: size.height)
-                .background(Color(nsColor: NativeReaderAppearance(theme: theme).background).opacity(0.98))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    SystemCursorBarrier()
-                        .allowsHitTesting(false)
-                }
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.primary.opacity(0.15), lineWidth: 1))
-                .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
-                .foregroundStyle(Color(nsColor: NativeReaderAppearance(theme: theme).foreground))
-                .preferredColorScheme(theme == .bold || theme == .focus ? .dark : .light)
-                .position(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
-                .onChange(of: CGRect(origin: origin, size: size), initial: true) { _, frame in
-                    guard translation == .zero else { return }
-                    onFrameChange(frame)
-                }
-                .onChange(of: translation) { _, value in
-                    if value == .zero { onFrameChange(CGRect(origin: origin, size: size)) }
-                }
-            }
-        }
-        .coordinateSpace(name: "speechPlayerWindow")
-        .onChange(of: session.isPlayerVisible) { _, visible in
-            if !visible { onFrameChange(.zero) }
+        Group {
+            if session.isExpanded { expandedPlayer } else { miniPlayer }
         }
         .onChange(of: session.rate, initial: true) { _, rate in draftRate = rate }
         .onChange(of: session.isExpanded) { _, expanded in
@@ -311,29 +392,5 @@ struct SpeechPlayerOverlay: View {
         .buttonStyle(OBooksIconButtonStyle(size: 28, cornerRadius: 5))
         .help(title)
         .accessibilityLabel(title)
-    }
-
-    private func playerOrigin(container: CGSize, size: CGSize) -> CGPoint {
-        CGPoint(
-            x: min(max(16, (container.width - size.width) / 2 + offset.width + translation.width), container.width - size.width - 16),
-            y: min(max(60, container.height - size.height - 76 + offset.height + translation.height), container.height - size.height - 64)
-        )
-    }
-
-    private func dragHandle(container: CGSize, size: CGSize) -> some View {
-        Capsule().fill(.secondary.opacity(0.35)).frame(width: 34, height: 3)
-            .frame(maxWidth: .infinity).frame(height: 20)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("speechPlayerWindow"))
-                .updating($translation) { value, state, transaction in
-                    transaction.disablesAnimations = true
-                    state = value.translation
-                }
-                .onEnded { value in
-                    let x = min(max(16, (container.width - size.width) / 2 + offset.width + value.translation.width), container.width - size.width - 16)
-                    let y = min(max(60, container.height - size.height - 76 + offset.height + value.translation.height), container.height - size.height - 64)
-                    offset = CGSize(width: x - (container.width - size.width) / 2, height: y - (container.height - size.height - 76))
-                })
-            .help("移动朗读播放器")
     }
 }
