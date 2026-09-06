@@ -66,7 +66,11 @@ struct SyncSettingsView: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(sync.status, systemImage: sync.lastError == nil ? "arrow.triangle.2.circlepath" : "exclamationmark.icloud")
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Label(sync.status, systemImage: sync.lastError == nil ? "arrow.triangle.2.circlepath" : "exclamationmark.icloud")
+                        Spacer(minLength: 8)
+                        actionButtons
+                    }
                     if let progress = sync.transferProgress { ProgressView(value: progress).frame(height: 8) }
                     if sync.isSyncing { ProgressView().controlSize(.small) }
                     if sync.pendingCount > 0 { Text("待同步: \(sync.pendingCount)").foregroundStyle(.secondary) }
@@ -74,7 +78,6 @@ struct SyncSettingsView: View {
                     if let error = settingsError { Text(error).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
                 }
                 .font(.callout)
-                actionRow
                 if !appModel.localCopySources.isEmpty {
                     LocalLibraryCopySection(
                         sources: appModel.localCopySources,
@@ -111,14 +114,13 @@ struct SyncSettingsView: View {
     }
 
     @ViewBuilder
-    private var actionRow: some View {
-        HStack {
+    private var actionButtons: some View {
+        HStack(spacing: 8) {
             if sync.isSignedIn {
                 Button { Task { await sync.synchronize() } } label: { Label("立即同步", systemImage: "arrow.triangle.2.circlepath") }
                     .disabled(busy)
                 Button { Task { await sync.downloadAll() } } label: { Label("下载全部", systemImage: "icloud.and.arrow.down") }
                     .disabled(busy)
-                Spacer()
                 Button("退出登录") {
                     Task {
                         await sync.logout()
@@ -127,7 +129,6 @@ struct SyncSettingsView: View {
                 }
                 .disabled(busy)
             } else if bound {
-                Spacer()
                 Button("登录") {
                     submitLogin()
                 }
@@ -136,6 +137,8 @@ struct SyncSettingsView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
+        .labelStyle(.titleOnly)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var accountFormPresented: Binding<Bool> {
