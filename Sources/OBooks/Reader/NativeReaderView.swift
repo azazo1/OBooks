@@ -40,7 +40,7 @@ struct NativeReaderView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let initialSize = NSSize(width: 900, height: 680)
+        let initialSize = AppWindowConfiguration.readerWindowSize
         let scrollView = ReaderScrollView(frame: NSRect(origin: .zero, size: initialSize))
         scrollView.wantsLayer = true
         scrollView.layer?.masksToBounds = true

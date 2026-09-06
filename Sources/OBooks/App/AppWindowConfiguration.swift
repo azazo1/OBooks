@@ -1,6 +1,9 @@
 import AppKit
 
 enum AppWindowConfiguration {
+    /// 阅读窗口首次打开时的内容尺寸, 也作为原生阅读视图的初始分页视口.
+    static let readerWindowSize = NSSize(width: 1180, height: 760)
+
     /// 阅读窗口底色跟随系统外观, 避免标题栏在浅色主题下露出黑色.
     static func readerWindowBackgroundColor(isDark: Bool) -> NSColor {
         isDark ? .black : .windowBackgroundColor
