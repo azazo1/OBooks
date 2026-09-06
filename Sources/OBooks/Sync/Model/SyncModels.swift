@@ -129,4 +129,26 @@ enum CloudSyncError: LocalizedError {
         case .unauthorized: return "会话已过期, 请重新登录"
         }
     }
+
+    static func forLogin(_ error: Error) -> CloudSyncError {
+        if let urlError = error as? URLError { return .message(connectionMessage(urlError)) }
+        if let cloud = error as? CloudSyncError {
+            if case .unauthorized = cloud { return .message("账号或密码无效") }
+            return cloud
+        }
+        return .message(error.localizedDescription)
+    }
+
+    static func connectionMessage(_ error: URLError) -> String {
+        switch error.code {
+        case .notConnectedToInternet, .dataNotAllowed:
+            return "网络不可用"
+        case .timedOut:
+            return "连接服务器超时"
+        case .cannotFindHost, .dnsLookupFailed:
+            return "找不到服务器"
+        default:
+            return "无法连接服务器"
+        }
+    }
 }

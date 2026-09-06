@@ -607,8 +607,8 @@ final class AppModel: ObservableObject {
                 deviceID: journal.deviceID,
                 deviceName: name
             )
-        } catch CloudSyncError.unauthorized {
-            throw CloudSyncError.message("账号或密码无效")
+        } catch {
+            throw CloudSyncError.forLogin(error)
         }
         let profile = try workspace.ensureAccountProfile(server: server, username: username)
         journal.account = SyncAccount(server: server, username: username, userID: tokens.userID)

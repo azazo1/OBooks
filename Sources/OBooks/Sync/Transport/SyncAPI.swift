@@ -60,10 +60,14 @@ final class SyncAPI {
 
     func login(username: String, password: String, deviceID: String, deviceName: String) async throws -> SyncTokens {
         struct Login: Encodable { var username: String; var password: String; var deviceID: String; var deviceName: String }
-        let body = try SyncCoding.encoder().encode(Login(username: username, password: password, deviceID: deviceID, deviceName: deviceName))
-        let tokens: SyncTokens = try await request("v1/auth/login", method: "POST", body: body, authenticated: false)
-        try accept(tokens)
-        return tokens
+        do {
+            let body = try SyncCoding.encoder().encode(Login(username: username, password: password, deviceID: deviceID, deviceName: deviceName))
+            let tokens: SyncTokens = try await request("v1/auth/login", method: "POST", body: body, authenticated: false)
+            try accept(tokens)
+            return tokens
+        } catch {
+            throw CloudSyncError.forLogin(error)
+        }
     }
 
     func logout() async throws {
@@ -82,12 +86,16 @@ final class SyncAPI {
             var currentPassword: String?
             var newPassword: String?
         }
-        let body = try SyncCoding.encoder().encode(Body(deviceName: deviceName, currentPassword: currentPassword, newPassword: newPassword))
-        try await authorized { token in
-            var request = self.makeRequest("v1/auth/account", method: "POST", body: body)
-            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-            let (data, response) = try await self.session.data(for: request)
-            try self.check(response, data: data)
+        do {
+            let body = try SyncCoding.encoder().encode(Body(deviceName: deviceName, currentPassword: currentPassword, newPassword: newPassword))
+            try await authorized { token in
+                var request = self.makeRequest("v1/auth/account", method: "POST", body: body)
+                request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+                let (data, response) = try await self.session.data(for: request)
+                try self.check(response, data: data)
+            }
+        } catch let error as URLError {
+            throw CloudSyncError.message(CloudSyncError.connectionMessage(error))
         }
     }
 
@@ -138,7 +146,7 @@ final class SyncAPI {
             var request = self.makeRequest(path, method: method, body: body, query: query)
             if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
             let (data, response) = try await self.session.data(for: request)
-            try self.check(response, data: data)
+            try self.check(response, data: data, sessionRetry: authenticated)
             guard data.count <= 16 * 1024 * 1024 else { throw CloudSyncError.message("服务端响应过大") }
             return try SyncCoding.decoder().decode(T.self, from: data)
         }
@@ -187,13 +195,22 @@ final class SyncAPI {
         return request
     }
 
-    private func check(_ response: URLResponse, data: Data) throws {
+    private func check(_ response: URLResponse, data: Data, sessionRetry: Bool = true) throws {
         guard let http = response as? HTTPURLResponse else { throw CloudSyncError.message("服务端响应无效") }
-        if http.statusCode == 401 { throw CloudSyncError.unauthorized }
-        guard (200..<300).contains(http.statusCode) else {
-            struct Failure: Decodable { struct Detail: Decodable { var message: String }; var error: Detail }
-            let message = (try? JSONDecoder().decode(Failure.self, from: data))?.error.message
-            throw CloudSyncError.message(message ?? "同步请求失败: HTTP \(http.statusCode)")
+        if http.statusCode == 401 {
+            let message = serverMessage(from: data)
+            if sessionRetry, message == nil || message == "请重新登录" || (message?.contains("会话") == true) {
+                throw CloudSyncError.unauthorized
+            }
+            throw CloudSyncError.message(message ?? "账号或密码无效")
         }
+        guard (200..<300).contains(http.statusCode) else {
+            throw CloudSyncError.message(serverMessage(from: data) ?? "同步请求失败: HTTP \(http.statusCode)")
+        }
+    }
+
+    private func serverMessage(from data: Data) -> String? {
+        struct Failure: Decodable { struct Detail: Decodable { var message: String }; var error: Detail }
+        return (try? JSONDecoder().decode(Failure.self, from: data))?.error.message
     }
 }

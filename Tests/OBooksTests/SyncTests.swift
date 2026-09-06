@@ -197,6 +197,14 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(encoded["range"] as? [Int], [12, 3])
     }
 
+    func testLoginErrorsDistinguishPasswordAndConnection() {
+        XCTAssertEqual(CloudSyncError.forLogin(CloudSyncError.unauthorized).localizedDescription, "账号或密码无效")
+        XCTAssertEqual(CloudSyncError.forLogin(URLError(.cannotConnectToHost)).localizedDescription, "无法连接服务器")
+        XCTAssertEqual(CloudSyncError.forLogin(URLError(.timedOut)).localizedDescription, "连接服务器超时")
+        XCTAssertEqual(CloudSyncError.forLogin(URLError(.notConnectedToInternet)).localizedDescription, "网络不可用")
+        XCTAssertEqual(CloudSyncError.forLogin(CloudSyncError.message("登录请求过于频繁")).localizedDescription, "登录请求过于频繁")
+    }
+
     private func makeBook() -> BookSummary {
         BookSummary(id: UUID(), title: "Book", authors: [], sortTitle: "book", sourceFileName: "book.epub", folderName: "local", coverPath: nil,
             spine: [EPUBSpineItem(id: "chapter", href: "chapter.xhtml", title: "Chapter", linear: true)], toc: [], progressFraction: 0, lastOpenedAt: nil, importedAt: Date(timeIntervalSince1970: 1000))

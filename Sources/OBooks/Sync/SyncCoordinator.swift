@@ -166,7 +166,10 @@ final class SyncCoordinator: ObservableObject {
             isSignedIn = true
             isSyncing = false
             await synchronize()
-        } catch { isSyncing = false; report(error) }
+        } catch {
+            isSyncing = false
+            report(CloudSyncError.forLogin(error), status: "登录失败")
+        }
     }
 
     func logout() async {
@@ -402,9 +405,13 @@ final class SyncCoordinator: ObservableObject {
         }
     }
 
-    private func report(_ error: Error) {
+    private func report(_ error: Error, status: String? = nil) {
         lastError = error.localizedDescription
-        status = (error as? URLError) != nil ? "离线, 等待重试" : "同步失败"
+        if let status {
+            self.status = status
+        } else {
+            self.status = (error as? URLError) != nil ? "离线, 等待重试" : "同步失败"
+        }
         logger.error("同步失败: \(error.localizedDescription, privacy: .public)")
     }
 }
