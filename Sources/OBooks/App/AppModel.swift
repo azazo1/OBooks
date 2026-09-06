@@ -30,7 +30,7 @@ final class AppModel: ObservableObject {
     private var progressSaveTask: Task<Void, Never>?
     private var terminationObservation: NSObjectProtocol?
 
-    init(rootURL: URL? = nil, credentials: any SyncCredentialStorage = SyncCredentialStore(), observeLifecycle: Bool = true) {
+    init(rootURL: URL? = nil, credentials: (any SyncCredentialStorage)? = nil, observeLifecycle: Bool = true) {
         let store = LibraryStore(rootURL: rootURL)
         let statsStore = ReadingStatsStore(rootURL: store.rootURL)
         let ledger = ReadingStatsLedger()
@@ -39,7 +39,7 @@ final class AppModel: ObservableObject {
         readingStatsStore = statsStore
         readingStats = ledger
         books = store.load()
-        sync = SyncCoordinator(rootURL: store.rootURL, credentials: credentials)
+        sync = SyncCoordinator(rootURL: store.rootURL, credentials: credentials ?? SyncCredentialStore(rootURL: store.rootURL))
         readingStatsTracker = ReadingStatsTracker(ledger: ledger) { [weak self] in
             guard let self else { return }
             self.sync.localDataChanged()

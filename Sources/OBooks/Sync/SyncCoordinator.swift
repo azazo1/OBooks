@@ -38,7 +38,7 @@ final class SyncCoordinator: ObservableObject {
         return Date().addingTimeInterval(journal.clockOffset)
     }
 
-    init(rootURL: URL, credentials: any SyncCredentialStorage = SyncCredentialStore()) {
+    init(rootURL: URL, credentials: any SyncCredentialStorage) {
         journalStore = SyncJournalStore(rootURL: rootURL)
         self.credentials = credentials
         do { journal = try journalStore.load() }

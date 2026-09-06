@@ -28,7 +28,7 @@ just server-run --settings settings.json
 
 ## 账号和设备
 
-在书库侧栏打开云同步设置, 填写服务地址, 用户名, 密码和设备名称. 同一账号可在多个设备登录, 不同账号的数据和文件相互隔离. refresh token 保存在 macOS Keychain 中, 同步文件不保存密码或 token.
+在书库侧栏打开云同步设置, 填写服务地址, 用户名, 密码和设备名称. 同一账号可在多个设备登录, 不同账号的数据和文件相互隔离. refresh token 以 0600 权限保存在书库目录的 `sync-refresh-token` 中, 同步文件不保存密码.
 
 ```shell
 just server-admin user-reset --username reader

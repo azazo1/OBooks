@@ -36,7 +36,7 @@ final class SyncAPI {
     private var refreshTask: Task<SyncTokens, Error>?
     var onServerTime: ((TimeInterval) -> Void)?
 
-    init(server: URL, credentials: any SyncCredentialStorage = SyncCredentialStore(), session: URLSession? = nil) {
+    init(server: URL, credentials: any SyncCredentialStorage, session: URLSession? = nil) {
         self.server = server
         self.credentials = credentials
         let configuration = URLSessionConfiguration.ephemeral
