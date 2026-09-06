@@ -3,7 +3,6 @@ import SwiftUI
 struct SyncSettingsView: View {
     @ObservedObject var appModel: AppModel
     @ObservedObject var sync: SyncCoordinator
-    @Environment(\.openWindow) private var openWindow
     @State private var server = ""
     @State private var username = ""
     @State private var password = ""
@@ -93,6 +92,10 @@ struct SyncSettingsView: View {
         .onChange(of: appModel.workspace?.activeID ?? "") { _, _ in
             fillFromAccount()
         }
+        .background(SettingsWindowProbe())
+        .sheet(isPresented: accountFormPresented) {
+            AccountFormView(appModel: appModel)
+        }
         .confirmationDialog(
             "删除本机账号",
             isPresented: $confirmingDelete,
@@ -153,9 +156,17 @@ struct SyncSettingsView: View {
         }
     }
 
+    private var accountFormPresented: Binding<Bool> {
+        Binding(
+            get: { appModel.accountForm != nil },
+            set: { presented in
+                if !presented { appModel.closeAccountForm() }
+            }
+        )
+    }
+
     private func openForm(_ kind: AccountFormKind) {
         appModel.openAccountForm(kind)
-        openWindow(id: "account-form")
     }
 
     private func switchToProfile(_ profile: LibraryProfile) {

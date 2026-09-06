@@ -48,12 +48,6 @@ struct OBooksApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
 
-        Window("账号", id: "account-form") {
-            AccountFormView(appModel: appModel)
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-
         Settings {
             SyncSettingsView(appModel: appModel)
         }

@@ -52,11 +52,17 @@ final class OBooksApplicationDelegate: NSObject, NSApplicationDelegate {
 
     private func configureNormalWindows() {
         for window in NSApp.windows where window.level == .normal {
+            if window.identifier == AppWindowConfiguration.settingsWindowID { continue }
             AppWindowConfiguration.applyPrimaryStageBehavior(window)
         }
     }
 
     private func focusPrimaryWindow() {
+        if let settings = AppWindowConfiguration.visibleSettingsWindow() {
+            NSApp.activate(ignoringOtherApps: true)
+            settings.makeKeyAndOrderFront(nil)
+            return
+        }
         guard let window = NSApp.mainWindow
             ?? NSApp.windows.first(where: { $0.level == .normal && $0.canBecomeKey }) else {
             return
@@ -67,8 +73,10 @@ final class OBooksApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureWindow(from notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window.level == .normal else {
+        guard let window = notification.object as? NSWindow else { return }
+        if AppWindowConfiguration.keepSettingsFocusedIfNeeded(for: window) { return }
+        guard window.level == .normal,
+              window.identifier != AppWindowConfiguration.settingsWindowID else {
             return
         }
         AppWindowConfiguration.applyPrimaryStageBehavior(window)

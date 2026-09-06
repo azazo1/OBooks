@@ -4,7 +4,7 @@ import SwiftUI
 struct AccountFormView: View {
     @ObservedObject var appModel: AppModel
     @ObservedObject var sync: SyncCoordinator
-    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.dismiss) private var dismiss
 
     @State private var server = ""
     @State private var username = ""
@@ -122,7 +122,7 @@ struct AccountFormView: View {
 
     private func close() {
         appModel.closeAccountForm()
-        dismissWindow(id: "account-form")
+        dismiss()
     }
 
     private func submit() async {
