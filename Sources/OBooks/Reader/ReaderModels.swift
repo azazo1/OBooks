@@ -149,6 +149,8 @@ struct ReaderAnnotation: Identifiable, Equatable, Codable, Hashable {
     let kind: String
     let sectionIndex: Int
     let range: NSRange
+    var modifiedAt: Date?
+    var conflictOf: String?
 
     init(
         id: UUID = UUID(),

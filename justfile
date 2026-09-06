@@ -46,3 +46,8 @@ server-run *args:
 # 管理同步服务账号.
 server-admin +args:
     cd server && go run ./cmd/obooks-server {{args}}
+
+# 使用临时服务验证两个 Swift 客户端的完整同步流程.
+sync-integration:
+    swift test --filter SyncTransportTests
+    cd server && OBOOKS_RUN_SWIFT_INTEGRATION=1 go test -count=1 -v ./internal/httpapi -run TestSwiftClientIntegration

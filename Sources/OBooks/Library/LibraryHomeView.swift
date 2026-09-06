@@ -387,6 +387,7 @@ struct BookCoverImage: View {
     let book: BookSummary
     let store: LibraryStore
     @State private var image: NSImage?
+    @State private var isDownloaded = true
 
     var body: some View {
         Group {
@@ -406,8 +407,24 @@ struct BookCoverImage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 5))
+        .overlay(alignment: .bottomTrailing) {
+            if !isDownloaded {
+                Image(systemName: "icloud.and.arrow.down")
+                    .font(.system(size: 14, weight: .semibold))
+                    .padding(6)
+                    .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 5))
+                    .padding(5)
+                    .help("打开时下载")
+            }
+        }
         .task(id: book.id) {
             image = store.coverImage(for: book)
+            isDownloaded = store.isDownloaded(book)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bookAssetsChanged)) { notification in
+            guard notification.object as? String == book.canonicalID else { return }
+            image = store.coverImage(for: book)
+            isDownloaded = store.isDownloaded(book)
         }
     }
 

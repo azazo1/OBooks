@@ -9,9 +9,13 @@ let package = Package(
     products: [
         .executable(name: "OBooks", targets: ["OBooks"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.20")
+    ],
     targets: [
         .executableTarget(
             name: "OBooks",
+            dependencies: ["ZIPFoundation"],
             path: "Sources/OBooks"
         ),
         .testTarget(

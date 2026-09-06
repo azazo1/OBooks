@@ -5,12 +5,14 @@ struct ReaderBookmark: Identifiable, Codable, Hashable, Sendable {
     let position: ReadingPosition
     let title: String
     let progressFraction: Double
+    var modifiedAt: Date?
 
     init(position: ReadingPosition, title: String, progressFraction: Double) {
         id = UUID()
         self.position = position
         self.title = title
         self.progressFraction = min(max(progressFraction, 0), 1)
+        modifiedAt = Date()
     }
 
     func matches(_ position: ReadingPosition) -> Bool {

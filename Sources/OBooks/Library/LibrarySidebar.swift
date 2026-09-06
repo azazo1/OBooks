@@ -5,6 +5,8 @@ struct LibrarySidebar: View {
     @Binding var query: String
     var searchFocused: FocusState<Bool>.Binding
     let onImport: () -> Void
+    @ObservedObject var sync: SyncCoordinator
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -51,6 +53,17 @@ struct LibrarySidebar: View {
             }
 
             Spacer(minLength: 18)
+
+            Button { openSettings() } label: {
+                Label(sync.status, systemImage: sync.lastError == nil ? "icloud" : "exclamationmark.icloud")
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .help("云同步设置")
 
             Button(action: onImport) {
                 HStack(spacing: 9) {

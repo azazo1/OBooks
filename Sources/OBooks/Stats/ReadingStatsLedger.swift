@@ -4,6 +4,7 @@ import OSLog
 
 final class ReadingStatsLedger: ObservableObject {
     @Published private(set) var buckets: [ReadingTimeBucket] = []
+    private(set) var events: [ReadingEvent] = []
 
     private var index: [BucketKey: Int] = [:]
     private let logger = Logger(subsystem: "com.obooks.app", category: "reading.stats")
@@ -15,12 +16,20 @@ final class ReadingStatsLedger: ObservableObject {
     }
 
     init(buckets: [ReadingTimeBucket] = []) {
+        events = buckets.map { ReadingEvent(id: UUID(), bookID: $0.bookID, day: $0.day, hour: $0.hour, seconds: $0.seconds) }
         rebuild(buckets)
         logger.info("载入阅读统计: buckets=\(self.buckets.count)")
     }
 
     func replaceAll(_ buckets: [ReadingTimeBucket]) {
+        events = buckets.map { ReadingEvent(id: UUID(), bookID: $0.bookID, day: $0.day, hour: $0.hour, seconds: $0.seconds) }
         rebuild(buckets)
+    }
+
+    func replaceEvents(_ events: [ReadingEvent]) {
+        var seen = Set<UUID>()
+        self.events = events.filter { seen.insert($0.id).inserted }
+        rebuild(self.events.map { ReadingTimeBucket(bookID: $0.bookID, day: $0.day, hour: $0.hour, seconds: $0.seconds) })
     }
 
     func record(bookID: UUID, from start: Date, duration: TimeInterval, calendar: Calendar) {
@@ -47,6 +56,7 @@ final class ReadingStatsLedger: ObservableObject {
     }
 
     func removeBook(_ id: UUID) {
+        events.removeAll { $0.bookID == id }
         let remaining = buckets.filter { $0.bookID != id }
         guard remaining.count != buckets.count else { return }
         rebuild(remaining)
@@ -115,6 +125,7 @@ final class ReadingStatsLedger: ObservableObject {
     }
 
     private func add(bookID: UUID, day: ReadingDay, hour: Int, seconds: TimeInterval) {
+        events.append(ReadingEvent(id: UUID(), bookID: bookID, day: day, hour: hour, seconds: seconds))
         merge(
             bookID: bookID,
             day: day,

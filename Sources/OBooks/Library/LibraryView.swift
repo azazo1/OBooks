@@ -70,7 +70,8 @@ struct LibraryView: View {
                 selection: $destination,
                 query: $query,
                 searchFocused: $searchFocused,
-                onImport: appModel.importEPUB
+                onImport: appModel.importEPUB,
+                sync: appModel.sync
             )
             Rectangle()
                 .fill(Color.white.opacity(0.08))
@@ -149,7 +150,9 @@ struct LibraryView: View {
                 bookPendingDeletion = nil
             }
         } message: {
-            Text("确定删除 \(bookPendingDeletion?.title ?? "这本书") 及其本地文件")
+            Text(appModel.sync.account == nil
+                ? "确定删除 \(bookPendingDeletion?.title ?? "这本书") 及其本地文件"
+                : "确定从所有设备删除 \(bookPendingDeletion?.title ?? "这本书"), 标注和阅读统计")
         }
     }
 

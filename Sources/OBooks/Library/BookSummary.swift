@@ -18,6 +18,10 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
     var isHiddenFromContinueReading: Bool
     var lastOpenedAt: Date?
     let importedAt: Date
+    var canonicalID: String?
+    var metadataModifiedAt: Date?
+    var progressModifiedAt: Date?
+    var storageRoot: URL?
 
     static let finishPromptThreshold = 0.95
 
@@ -64,7 +68,8 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
     }
 
     var folderURL: URL {
-        LibraryStore.booksDirectoryURL.appendingPathComponent(folderName, isDirectory: true)
+        let booksURL = storageRoot?.appendingPathComponent("Books", isDirectory: true) ?? LibraryStore.booksDirectoryURL
+        return booksURL.appendingPathComponent(folderName, isDirectory: true)
     }
 
     var isNearCompletion: Bool {
@@ -100,6 +105,9 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         case isHiddenFromContinueReading
         case lastOpenedAt
         case importedAt
+        case canonicalID
+        case metadataModifiedAt
+        case progressModifiedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +129,9 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         isHiddenFromContinueReading = try container.decodeIfPresent(Bool.self, forKey: .isHiddenFromContinueReading) ?? false
         lastOpenedAt = try container.decodeIfPresent(Date.self, forKey: .lastOpenedAt)
         importedAt = try container.decode(Date.self, forKey: .importedAt)
+        canonicalID = try container.decodeIfPresent(String.self, forKey: .canonicalID)
+        metadataModifiedAt = try container.decodeIfPresent(Date.self, forKey: .metadataModifiedAt)
+        progressModifiedAt = try container.decodeIfPresent(Date.self, forKey: .progressModifiedAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -142,5 +153,8 @@ struct BookSummary: Identifiable, Codable, Hashable, Sendable {
         try container.encode(isHiddenFromContinueReading, forKey: .isHiddenFromContinueReading)
         try container.encodeIfPresent(lastOpenedAt, forKey: .lastOpenedAt)
         try container.encode(importedAt, forKey: .importedAt)
+        try container.encodeIfPresent(canonicalID, forKey: .canonicalID)
+        try container.encodeIfPresent(metadataModifiedAt, forKey: .metadataModifiedAt)
+        try container.encodeIfPresent(progressModifiedAt, forKey: .progressModifiedAt)
     }
 }

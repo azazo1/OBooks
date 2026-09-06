@@ -107,6 +107,7 @@ struct ReaderView: View {
     @State private var annotations: [ReaderAnnotation] = []
     @State private var noteContext = ""
     @State private var noteText = ""
+    @State private var editingOriginalAnnotation: ReaderAnnotation?
     @State private var noteRange = NSRange(location: NSNotFound, length: 0)
     @State private var editingAnnotationID: UUID?
     @State private var noteEditorSource: NoteEditorSource?
@@ -312,6 +313,15 @@ struct ReaderView: View {
         }
         .onChange(of: flow) { _, newFlow in
             UserDefaults.standard.set(newFlow.preferenceValue, forKey: "reader.browsingMode")
+        }
+        .onChange(of: appModel.books.first(where: { $0.id == book.id })?.annotations) { _, updated in
+            if let updated, annotations != updated { annotations = updated }
+        }
+        .onChange(of: appModel.books.first(where: { $0.id == book.id })?.readingPosition) { _, position in
+            guard let position, position != currentPosition else { return }
+            currentPosition = position
+            pendingPosition = position
+            pendingPositionAnimated = false
         }
         .onChange(of: activePanel) { previousPanel, panel in
             if panel == nil, noteEditorSource != nil {
@@ -584,6 +594,11 @@ struct ReaderView: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .accessibilityLabel("笔记: \(annotation.text)")
+                                    }
+                                    if annotation.conflictOf != nil {
+                                        Label("冲突副本", systemImage: "doc.on.doc")
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
                                     }
                                     HStack(spacing: 6) {
                                         Image(systemName: annotation.kind == "note" ? "note.text" : "highlighter")
@@ -1017,6 +1032,7 @@ struct ReaderView: View {
         noteContext = annotation.quote ?? ""
         noteRange = annotation.range
         noteText = annotation.text
+        editingOriginalAnnotation = annotation
         editingAnnotationID = annotation.id
         noteEditorSource = inPanel ? .panel : .highlightsList
         guard navigate else {
@@ -1048,7 +1064,12 @@ struct ReaderView: View {
         guard !trimmedText.isEmpty,
               noteRange.location != NSNotFound,
               noteRange.length > 0 else { return }
-        if let editingAnnotationID,
+        if let original = editingOriginalAnnotation, editingAnnotationID != nil,
+           annotations.first(where: { $0.id == original.id }) != original {
+            var copy = ReaderAnnotation(text: trimmedText, kind: "note", sectionIndex: original.sectionIndex, range: original.range, quote: original.quote)
+            copy.conflictOf = original.id.uuidString
+            annotations.insert(copy, at: 0)
+        } else if let editingAnnotationID,
            let index = annotations.firstIndex(where: { $0.id == editingAnnotationID }) {
             let annotation = annotations[index]
             annotations[index] = ReaderAnnotation(
@@ -1071,6 +1092,7 @@ struct ReaderView: View {
         }
         persistAnnotations()
         editingAnnotationID = nil
+        editingOriginalAnnotation = nil
         noteEditorSource = nil
         if activePanel == .note { activePanel = nil }
     }
@@ -1096,6 +1118,7 @@ struct ReaderView: View {
 
     private func persistAnnotations() {
         appModel.updateAnnotations(bookID: book.id, annotations: annotations)
+        annotations = appModel.books.first(where: { $0.id == book.id })?.annotations ?? annotations
     }
 
     private func moveSection(_ direction: Int) {

@@ -21,24 +21,44 @@ final class AppModel: ObservableObject {
     let libraryStore: LibraryStore
     let readingStats: ReadingStatsLedger
     let speechPlaybackOwner = SpeechPlaybackOwner()
+    let sync: SyncCoordinator
     private let readingStatsStore: ReadingStatsStore
-    private let readingStatsTracker: ReadingStatsTracker
+    private var readingStatsTracker: ReadingStatsTracker!
     private let logger = Logger(subsystem: "com.obooks.app", category: "app")
     private var readerWindows: [UUID: NSWindow] = [:]
     private var readerDelegates: [UUID: ReaderWindowDelegate] = [:]
     private var progressSaveTask: Task<Void, Never>?
+    private var terminationObservation: NSObjectProtocol?
 
-    init() {
-        let store = LibraryStore()
+    init(rootURL: URL? = nil, credentials: any SyncCredentialStorage = SyncCredentialStore(), observeLifecycle: Bool = true) {
+        let store = LibraryStore(rootURL: rootURL)
         let statsStore = ReadingStatsStore(rootURL: store.rootURL)
-        let ledger = ReadingStatsLedger(buckets: statsStore.load())
+        let ledger = ReadingStatsLedger()
+        ledger.replaceEvents(statsStore.loadEvents())
         libraryStore = store
         readingStatsStore = statsStore
         readingStats = ledger
         books = store.load()
-        readingStatsTracker = ReadingStatsTracker(ledger: ledger) {
-            statsStore.save(ledger.buckets)
+        sync = SyncCoordinator(rootURL: store.rootURL, credentials: credentials)
+        readingStatsTracker = ReadingStatsTracker(ledger: ledger) { [weak self] in
+            guard let self else { return }
+            self.sync.localDataChanged()
+            statsStore.saveEvents(ledger.events)
         }
+        sync.attach(to: self, observeLifecycle: observeLifecycle)
+        guard observeLifecycle else { return }
+        terminationObservation = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.readingStatsTracker.flush()
+                self.sync.localDataChanged()
+                self.libraryStore.save(self.books)
+            }
+        }
+    }
+
+    deinit {
+        if let terminationObservation { NotificationCenter.default.removeObserver(terminationObservation) }
     }
 
     func importEPUB() {
@@ -59,18 +79,29 @@ final class AppModel: ObservableObject {
     }
 
     func importEPUB(at url: URL) {
-        do {
-            let book = try EPUBImporter(store: libraryStore).importBook(from: url)
+        Task { @MainActor in
+          do {
+            let store = libraryStore
+            var book = try await Task.detached(priority: .userInitiated) { try EPUBImporter(store: store).importBook(from: url) }.value
+            if let existing = books.first(where: { $0.canonicalID == book.canonicalID && book.canonicalID != nil }) {
+                if !store.isDownloaded(existing) {
+                    try FileManager.default.moveItem(at: book.folderURL, to: existing.folderURL)
+                    try store.preserveArchive(store.archiveURL(for: book), for: existing)
+                }
+                try store.deleteBookData(for: book)
+                book = existing
+            }
             books.removeAll { $0.id == book.id }
             books.append(book)
             books.sort { $0.sortTitle.localizedStandardCompare($1.sortTitle) == .orderedAscending }
-            libraryStore.save(books)
+            persistLibrary()
             selectedBookID = book.id
             openReader(book)
             logger.info("导入完成: title=\(book.title, privacy: .public)")
         } catch {
             logger.error("导入失败: file=\(url.lastPathComponent, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
             alert = AppAlert(title: "导入失败", message: error.localizedDescription)
+          }
         }
     }
 
@@ -80,7 +111,8 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            try libraryStore.deleteBookData(for: book)
+            readingStatsTracker.stop(bookID: book.id)
+            try sync.deleteBook(book)
         } catch {
             logger.error("删除失败: title=\(book.title, privacy: .public), error=\(error.localizedDescription, privacy: .public)")
             alert = AppAlert(title: "删除失败", message: error.localizedDescription)
@@ -90,7 +122,7 @@ final class AppModel: ObservableObject {
         progressSaveTask?.cancel()
         closeReader(for: book.id)
         readingStats.removeBook(book.id)
-        readingStatsStore.save(readingStats.buckets)
+        readingStatsStore.saveEvents(readingStats.events)
         books.removeAll { $0.id == book.id }
         if selectedBookID == book.id {
             selectedBookID = nil
@@ -98,7 +130,9 @@ final class AppModel: ObservableObject {
         if openBook?.id == book.id {
             openBook = nil
         }
-        libraryStore.save(books)
+        persistLibrary()
+        do { try libraryStore.deleteBookData(for: book) }
+        catch { alert = AppAlert(title: "文件清理失败", message: error.localizedDescription) }
         logger.info("删除完成: title=\(book.title, privacy: .public)")
     }
 
@@ -116,6 +150,16 @@ final class AppModel: ObservableObject {
     }
 
     func openReader(_ book: BookSummary) {
+        guard libraryStore.isDownloaded(book) else {
+            Task { @MainActor in
+                if await sync.download(book), let current = books.first(where: { $0.id == book.id }) {
+                    openReader(current)
+                } else if let error = sync.lastError {
+                    alert = AppAlert(title: "下载失败", message: error)
+                }
+            }
+            return
+        }
         if let window = readerWindows[book.id] {
             updateLastOpened(book.id)
             AppWindowConfiguration.applyPrimaryStageBehavior(window)
@@ -157,6 +201,7 @@ final class AppModel: ObservableObject {
                 self.readerWindows.removeValue(forKey: book.id)
                 self.readerDelegates.removeValue(forKey: book.id)
                 self.readingStatsTracker.stop(bookID: book.id)
+                self.persistLibrary()
                 withExtendedLifetime((retainedWindow, retainedDelegate)) {}
             },
             onReadingActiveChange: { [weak self] isActive in
@@ -199,29 +244,39 @@ final class AppModel: ObservableObject {
         if let position {
             books[index].readingPosition = position
         }
-        books[index].lastOpenedAt = Date()
+        books[index].lastOpenedAt = sync.now
+        books[index].progressModifiedAt = sync.now
         readingStatsTracker.noteInteraction()
+        sync.localDataChanged()
         scheduleProgressSave()
     }
 
     func toggleBookmark(bookID: UUID, position: ReadingPosition, title: String, progressFraction: Double) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
         books[index].toggleBookmark(at: position, title: title, progressFraction: progressFraction)
-        libraryStore.save(books)
+        if let bookmarkIndex = books[index].bookmarks.firstIndex(where: { $0.matches(position) }) {
+            books[index].bookmarks[bookmarkIndex].modifiedAt = sync.now
+        }
+        persistLibrary()
         logger.info("更新书签: book=\(bookID), count=\(self.books[index].bookmarks.count)")
     }
 
     func removeBookmark(bookID: UUID, bookmarkID: UUID) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
         books[index].bookmarks.removeAll { $0.id == bookmarkID }
-        libraryStore.save(books)
+        persistLibrary()
         logger.info("移除书签: book=\(bookID), bookmark=\(bookmarkID)")
     }
 
     func updateAnnotations(bookID: UUID, annotations: [ReaderAnnotation]) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
-        books[index].annotations = annotations
-        libraryStore.save(books)
+        let original = books[index].annotations
+        books[index].annotations = annotations.map { value in
+            var annotation = value
+            if original.first(where: { $0.id == value.id }) != value { annotation.modifiedAt = sync.now }
+            return annotation
+        }
+        persistLibrary()
         logger.info("更新高亮和笔记: book=\(bookID), count=\(annotations.count)")
     }
 
@@ -230,8 +285,9 @@ final class AppModel: ObservableObject {
             return
         }
         books[index].isFinished.toggle()
+        books[index].metadataModifiedAt = sync.now
         let book = books[index]
-        libraryStore.save(books)
+        persistLibrary()
         logger.info("更新阅读完成状态: title=\(book.title, privacy: .public), finished=\(book.isFinished, privacy: .public)")
     }
 
@@ -240,7 +296,8 @@ final class AppModel: ObservableObject {
             return
         }
         books[index].isHiddenFromContinueReading = true
-        libraryStore.save(books)
+        books[index].metadataModifiedAt = sync.now
+        persistLibrary()
         logger.info("从继续阅读中移除: book=\(bookID)")
     }
 
@@ -249,7 +306,7 @@ final class AppModel: ObservableObject {
         progressSaveTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let self else { return }
-            self.libraryStore.save(self.books)
+            self.persistLibrary()
         }
     }
 
@@ -257,8 +314,75 @@ final class AppModel: ObservableObject {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else {
             return
         }
-        books[index].lastOpenedAt = Date()
+        books[index].lastOpenedAt = sync.now
+        books[index].progressModifiedAt = sync.now
         books[index].isHiddenFromContinueReading = false
-        libraryStore.save(books)
+        books[index].metadataModifiedAt = sync.now
+        persistLibrary()
+    }
+
+    private func persistLibrary() {
+        sync.localDataChanged()
+        if !libraryStore.save(books) { alert = AppAlert(title: "保存失败", message: "无法保存本地书库") }
+    }
+
+    func assignCanonicalID(_ canonicalID: String, to bookID: UUID) throws {
+        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
+        books[index].canonicalID = canonicalID
+        guard libraryStore.save(books) else { throw CloudSyncError.message("保存图书身份失败") }
+    }
+
+    func mergeDuplicateBooks() throws {
+        let groups = Dictionary(grouping: books.filter { $0.canonicalID != nil }, by: { $0.canonicalID! })
+        var events = readingStats.events
+        var discarded: [BookSummary] = []
+        for duplicates in groups.values where duplicates.count > 1 {
+            let ordered = duplicates.sorted {
+                $0.importedAt == $1.importedAt ? $0.id.uuidString < $1.id.uuidString : $0.importedAt < $1.importedAt
+            }
+            var kept = ordered[0]
+            var bookmarkIDs = Set(kept.bookmarks.map(\.id))
+            var annotationIDs = Set(kept.annotations.map(\.id))
+            for book in ordered.dropFirst() {
+                kept.bookmarks += book.bookmarks.filter { bookmarkIDs.insert($0.id).inserted }
+                kept.annotations += book.annotations.filter { annotationIDs.insert($0.id).inserted }
+                if (book.progressModifiedAt ?? book.lastOpenedAt ?? .distantPast) > (kept.progressModifiedAt ?? kept.lastOpenedAt ?? .distantPast) {
+                    kept.progressFraction = book.progressFraction
+                    kept.readingPosition = book.readingPosition
+                    kept.lastOpenedAt = book.lastOpenedAt
+                    kept.progressModifiedAt = book.progressModifiedAt
+                }
+                if !libraryStore.isDownloaded(kept), libraryStore.isDownloaded(book) {
+                    try FileManager.default.moveItem(at: book.folderURL, to: kept.folderURL)
+                }
+                for index in events.indices where events[index].bookID == book.id { events[index].bookID = kept.id }
+                closeReader(for: book.id)
+                discarded.append(book)
+            }
+            books.removeAll { book in ordered.contains(where: { $0.id == book.id }) }
+            books.append(kept)
+        }
+        guard !discarded.isEmpty else { return }
+        readingStats.replaceEvents(events)
+        guard libraryStore.save(books), readingStatsStore.saveEvents(events) else { throw CloudSyncError.message("合并重复图书失败") }
+        for book in discarded { try libraryStore.deleteBookData(for: book) }
+    }
+
+    func applySyncedLibrary(books replacement: [BookSummary], events: [ReadingEvent], removed: [BookSummary]) throws {
+        for book in removed {
+            closeReader(for: book.id)
+            try libraryStore.deleteBookData(for: book)
+            if selectedBookID == book.id { selectedBookID = nil }
+            if openBook?.id == book.id { openBook = nil }
+        }
+        books = replacement.map { original in
+            var book = original
+            book.storageRoot = libraryStore.rootURL
+            return book
+        }
+        readingStats.replaceEvents(events)
+        guard libraryStore.save(books), readingStatsStore.saveEvents(events) else {
+            throw CloudSyncError.message("无法保存同步结果")
+        }
     }
 }

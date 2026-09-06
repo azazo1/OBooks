@@ -47,5 +47,9 @@ struct OBooksApp: App {
         }
         .windowResizability(.contentSize)
         .defaultPosition(.center)
+
+        Settings {
+            SyncSettingsView(sync: appModel.sync)
+        }
     }
 }
