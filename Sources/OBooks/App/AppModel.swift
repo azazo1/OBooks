@@ -437,7 +437,6 @@ final class AppModel: ObservableObject {
                     destEvents: &destEvents
                 ) { [weak self] message in
                     self?.copyStatus = message
-                    self?.sync.status = message
                 }
                 books = destBooks
                 readingStats.replaceEvents(destEvents)
