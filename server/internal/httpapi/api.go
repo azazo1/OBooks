@@ -164,7 +164,10 @@ func (a *API) putFile(kind string) func(http.ResponseWriter, *http.Request, auth
 		if kind == "cover" { limit = library.MaxCover }
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 		started := time.Now()
-		err := a.Files.Put(r.Context(), id.UserID, bookID, kind, r.Body)
+		logger := a.Logger.With("user", id.UserID, "book", bookID, "kind", kind)
+		logger.Info("开始接收文件")
+		progress := &uploadProgress{reader:r.Body, logger:logger, lastReport:started}
+		err := a.Files.Put(r.Context(), id.UserID, bookID, kind, progress)
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) { fail(w, 413, "too_large", "文件过大"); return }
 		if errors.Is(err, library.ErrInvalid) { fail(w, 400, "invalid_file", "文件校验失败"); return }

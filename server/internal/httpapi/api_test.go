@@ -236,3 +236,24 @@ func TestSwiftClientIntegration(t *testing.T) {
 	if err != nil { t.Fatalf("Swift 联调失败: %v\n%s", err, output) }
 	t.Log(string(output))
 }
+
+func TestGarbageCollectionRequiresEveryDeviceAcknowledgement(t *testing.T) {
+	f := setup(t)
+	_, err := f.api.Auth.Login(context.Background(), "alice", "a-long-test-password", "offline-device", "B")
+	if err != nil { t.Fatal(err) }
+	c := bookChange()
+	f.push(t, c)
+	c.ChangeID = uuid(9998)
+	c.DeletedAt = &c.ModifiedAt
+	f.push(t, c)
+	page := f.pull(t, "0")
+	_, err = f.api.Sync.Pull(context.Background(), f.tokens.UserID, device, page.Cursor)
+	if err != nil { t.Fatal(err) }
+	count, err := f.api.Files.Prune(context.Background(), 30*24*time.Hour)
+	if err != nil || count != 0 { t.Fatalf("设备尚未确认就清理: %d %v", count, err) }
+	_, err = f.api.Sync.Pull(context.Background(), f.tokens.UserID, "offline-device", page.Cursor)
+	if err != nil { t.Fatal(err) }
+	count, err = f.api.Files.Prune(context.Background(), 30*24*time.Hour)
+	if err != nil || count != 1 { t.Fatalf("文件回收失败: %d %v", count, err) }
+	if len(f.pull(t, "0").Changes) != 2 { t.Fatal("墓碑被清理, 新设备可能复活旧数据") }
+}

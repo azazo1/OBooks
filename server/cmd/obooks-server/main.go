@@ -29,13 +29,14 @@ func main() {
 }
 
 func run(logger *slog.Logger, args []string) error {
-	if len(args) == 0 { return errors.New("需要子命令: serve, user-create, user-reset 或 user-disable") }
+	if len(args) == 0 { return errors.New("需要子命令: serve, user-create, user-reset, user-disable 或 gc") }
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	settingsFile := flags.String("settings", "", "服务端 JSON 配置文件")
 	dataDirectory := flags.String("data-dir", "", "覆盖数据目录")
 	username := flags.String("username", "", "管理员操作的用户名")
 	allowHTTP := flags.Bool("allow-http", false, "允许非回环地址使用 HTTP, 仅用于 TLS 反向代理后方")
+	retentionDays := flags.Int("retention-days", 30, "已删除文件的最短保留天数")
 	if err := flags.Parse(args[1:]); err != nil { return err }
 	if flags.NArg() != 0 { return errors.New("存在多余参数") }
 	s, err := settings.Load(*settingsFile)
@@ -48,6 +49,12 @@ func run(logger *slog.Logger, args []string) error {
 	defer db.Close()
 	authService := &auth.Service{DB:db, AccessTTL:time.Duration(s.AccessTokenSeconds)*time.Second, RefreshTTL:time.Duration(s.RefreshTokenSeconds)*time.Second}
 	switch command {
+	case "gc":
+		if *retentionDays < 1 || *retentionDays > 36500 { return errors.New("保留天数必须在 1 到 36500 之间") }
+		files := &library.Store{DB:db, Root:filepath.Join(s.DataDirectory, "objects")}
+		count, err := files.Prune(ctx, time.Duration(*retentionDays)*24*time.Hour)
+		if err == nil { logger.Info("文件回收完成", "books", count) }
+		return err
 	case "user-create", "user-reset", "user-disable":
 		if *username == "" { return errors.New("需要 --username") }
 		password := ""
