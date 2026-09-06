@@ -1239,6 +1239,14 @@ struct NativeReaderView: NSViewRepresentable {
             if let target = textView.pageOffset(forCharacter: range.location) {
                 let current = scrollView.contentView.bounds.minY
                 guard abs(target - current) > 1 else { return }
+                // 同一页的少量 Y 偏差只静默对齐, 避免刚进书或 TTS 首包时播放假翻页动画.
+                let step = max(1, textView.pageViewportHeight)
+                let currentPage = Int((current / step).rounded())
+                let targetPage = Int((target / step).rounded())
+                if currentPage == targetPage {
+                    scrollView.scroll(to: target, animated: false)
+                    return
+                }
                 scrollView.transitionContent(direction: target > current ? 1 : -1) { [weak scrollView] in
                     scrollView?.scroll(to: target, animated: false)
                     return ReaderPageTurn(rollback: {})

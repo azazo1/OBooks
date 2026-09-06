@@ -80,6 +80,27 @@ final class ReaderSpeechHighlightTests: XCTestCase {
         }
     }
 
+    func testSpeechRevealOnSamePageSnapsWithoutPageTransition() throws {
+        for columns in [1, 2] {
+            let fixture = Fixture(columns: columns)
+            defer { fixture.close() }
+            let manager = try XCTUnwrap(fixture.textView.layoutManager)
+            let right = manager.characterRange(
+                forGlyphRange: manager.glyphRange(for: manager.textContainers[columns - 1]),
+                actualGlyphRange: nil
+            )
+            fixture.scrollView.scroll(to: 12, animated: false)
+            fixture.coordinator.showSpeechRange(NSRange(location: 0, length: 3))
+            XCTAssertFalse(fixture.scrollView.isPageTransitionActive)
+            XCTAssertEqual(fixture.scrollView.contentView.bounds.minY, 0, accuracy: 1)
+
+            fixture.scrollView.scroll(to: 12, animated: false)
+            fixture.coordinator.showSpeechRange(NSRange(location: right.location, length: 3))
+            XCTAssertFalse(fixture.scrollView.isPageTransitionActive)
+            XCTAssertEqual(fixture.scrollView.contentView.bounds.minY, 0, accuracy: 1)
+        }
+    }
+
     @MainActor
     private final class Fixture {
         let coordinator = NativeReaderView.Coordinator()
