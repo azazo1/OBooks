@@ -113,6 +113,11 @@ final class SyncCoordinator: ObservableObject {
         if isSignedIn { schedule(delay: 0) }
     }
 
+    func retainError(_ message: String, status: String) {
+        lastError = message
+        self.status = status
+    }
+
     func login(server: String, username: String, password: String) async {
         guard !storageFailed, !isSyncing, downloading.isEmpty else { return }
         do {

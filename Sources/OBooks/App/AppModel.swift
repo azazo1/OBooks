@@ -32,19 +32,37 @@ final class AppModel: ObservableObject {
     private var progressSaveTask: Task<Void, Never>?
     private var terminationObservation: NSObjectProtocol?
 
-    init(rootURL: URL? = nil, credentials: (any SyncCredentialStorage)? = nil, observeLifecycle: Bool = true) {
-        let workspace: LibraryWorkspace?
+    convenience init(rootURL: URL? = nil, credentials: (any SyncCredentialStorage)? = nil, observeLifecycle: Bool = true) {
+        let resolvedWorkspace: LibraryWorkspace?
         let store: LibraryStore
         if let rootURL {
-            workspace = nil
+            resolvedWorkspace = nil
             store = LibraryStore(rootURL: rootURL)
         } else if let opened = try? LibraryWorkspace.openDefault() {
-            workspace = opened
+            resolvedWorkspace = opened
             store = LibraryStore(rootURL: opened.activeRoot)
         } else {
-            workspace = nil
+            resolvedWorkspace = nil
             store = LibraryStore()
         }
+        self.init(workspace: resolvedWorkspace, store: store, credentials: credentials, observeLifecycle: observeLifecycle)
+    }
+
+    convenience init(workspace: LibraryWorkspace, observeLifecycle: Bool = true) {
+        self.init(
+            workspace: workspace,
+            store: LibraryStore(rootURL: workspace.activeRoot),
+            credentials: nil,
+            observeLifecycle: observeLifecycle
+        )
+    }
+
+    private init(
+        workspace: LibraryWorkspace?,
+        store: LibraryStore,
+        credentials: (any SyncCredentialStorage)?,
+        observeLifecycle: Bool
+    ) {
         let statsStore = ReadingStatsStore(rootURL: store.rootURL)
         let ledger = ReadingStatsLedger()
         ledger.replaceEvents(statsStore.loadEvents())
@@ -431,22 +449,59 @@ final class AppModel: ObservableObject {
         workspace?.sources(excluding: workspace?.activeID ?? "") ?? []
     }
 
-    func loginToAccount(server: String, username: String, password: String) async {
+    var profiles: [LibraryProfile] {
+        workspace?.profiles ?? []
+    }
+
+    func hasSavedSession(for profile: LibraryProfile) -> Bool {
+        guard let workspace, !profile.isUnbound else { return false }
+        return (try? SyncCredentialStore(rootURL: workspace.root(for: profile.id)).read()) != nil
+    }
+
+    func switchToProfile(_ profileID: String) {
+        do {
+            try switchToProfileThrowing(profileID)
+        } catch {
+            logger.error("切换账号失败: \(error.localizedDescription, privacy: .public)")
+            alert = AppAlert(title: "切换账号失败", message: error.localizedDescription)
+        }
+    }
+
+    @discardableResult
+    func loginToAccount(server: String, username: String, password: String, deviceName: String? = nil) async -> Bool {
+        let previousID = workspace?.activeID
         do {
             let url = try SyncAPI.validateServer(server)
             try persistCurrentProfile()
             if let workspace {
                 let profile = try workspace.ensureAccountProfile(server: url, username: username)
                 if profile.id != workspace.activeID {
-                    try switchProfile(to: profile.id)
+                    try switchToProfileThrowing(profile.id, persistCurrent: false)
                 }
             }
-            await sync.login(server: server, username: username, password: password)
-            if let workspace, let account = sync.account {
-                try workspace.updateUserID(account.userID, for: workspace.activeID)
+            if let deviceName {
+                let trimmed = deviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { sync.deviceName = trimmed }
             }
+            await sync.login(server: server, username: username, password: password)
+            if sync.isSignedIn {
+                if let workspace, let account = sync.account {
+                    try workspace.updateUserID(account.userID, for: workspace.activeID)
+                }
+                objectWillChange.send()
+                return true
+            }
+            let message = sync.lastError
+            try restoreProfile(previousID)
+            if let message {
+                sync.retainError(message, status: "登录失败")
+                alert = AppAlert(title: "登录失败", message: message)
+            }
+            return false
         } catch {
+            try? restoreProfile(previousID)
             alert = AppAlert(title: "登录失败", message: error.localizedDescription)
+            return false
         }
     }
 
@@ -487,6 +542,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func switchToProfileThrowing(_ profileID: String, persistCurrent: Bool = true) throws {
+        guard let workspace else { throw CloudSyncError.message("当前运行没有书库工作区") }
+        guard profileID != workspace.activeID else { return }
+        guard !sync.isSyncing, sync.downloading.isEmpty else {
+            throw CloudSyncError.message("正在同步, 请稍后再切换账号")
+        }
+        if persistCurrent { try persistCurrentProfile() }
+        try switchProfile(to: profileID)
+    }
+
+    private func restoreProfile(_ profileID: String?) throws {
+        guard let workspace, let profileID, profileID != workspace.activeID else { return }
+        try switchProfile(to: profileID)
+    }
+
     private func switchProfile(to profileID: String) throws {
         guard let workspace else { throw CloudSyncError.message("当前运行没有书库工作区") }
         for id in Array(readerWindows.keys) { closeReader(for: id) }
@@ -498,6 +568,7 @@ final class AppModel: ObservableObject {
         books = libraryStore.load()
         readingStats.replaceEvents(readingStatsStore.loadEvents())
         sync.rebind(rootURL: workspace.activeRoot)
+        logger.info("已切换书库: \(profileID, privacy: .public)")
         objectWillChange.send()
     }
 }
