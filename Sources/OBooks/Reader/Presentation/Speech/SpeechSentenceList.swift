@@ -19,8 +19,6 @@ struct SpeechSentenceList: View {
     @State private var returnTask: Task<Void, Never>?
     @State private var pageTask: Task<Void, Never>?
     @State private var candidatePage: Int?
-    @State private var windowStart = 0
-    @State private var windowEnd = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -29,7 +27,7 @@ struct SpeechSentenceList: View {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 10) {
                         Color.clear.frame(height: geometry.size.height / 2 - 20)
-                        ForEach(renderedSentences) { sentence in
+                        ForEach(session.sentences) { sentence in
                             SpeechSentenceRow(
                                 sentence: sentence,
                                 isCurrent: sentence.id == session.sentenceIndex,
@@ -40,7 +38,6 @@ struct SpeechSentenceList: View {
                                 candidate = sentence.id
                                 clickedCandidate = true
                                 browsing = true
-                                ensureWindow(around: sentence.id)
                                 armReturn()
                                 withAnimation(animation) { proxy.scrollTo(sentence.id, anchor: .center) }
                             } onPlay: {
@@ -49,6 +46,7 @@ struct SpeechSentenceList: View {
                                 candidate = nil
                                 onPlay(sentence.id)
                             }
+                            .id(sentence.id)
                         }
                         Color.clear.frame(height: geometry.size.height / 2 - 20)
                     }
@@ -66,23 +64,13 @@ struct SpeechSentenceList: View {
                     if browsing, !clickedCandidate { chooseCenter(height: geometry.size.height) }
                 }
                 .onChange(of: session.sentenceIndex) { _, index in
-                    if !browsing { ensureWindow(around: index) }
                     guard !browsing else { return }
                     follow(index, proxy: proxy, height: geometry.size.height)
                 }
                 .onChange(of: browsing) { _, value in
-                    if !value {
-                        ensureWindow(around: session.sentenceIndex, resetting: true)
-                        follow(session.sentenceIndex, proxy: proxy, height: geometry.size.height)
-                    }
+                    if !value { follow(session.sentenceIndex, proxy: proxy, height: geometry.size.height) }
                 }
-                .onChange(of: session.sentences.count) { _, _ in
-                    ensureWindow(around: candidate ?? session.sentenceIndex, resetting: true)
-                }
-                .onAppear {
-                    ensureWindow(around: session.sentenceIndex, resetting: true)
-                    proxy.scrollTo(session.sentenceIndex, anchor: .center)
-                }
+                .onAppear { follow(session.sentenceIndex, proxy: proxy, height: geometry.size.height) }
                 .onChange(of: candidate) { _, index in
                     candidatePage = nil
                     pageTask?.cancel()
@@ -100,19 +88,6 @@ struct SpeechSentenceList: View {
 
     private var animation: Animation? { reduceMotion ? nil : .easeOut(duration: 0.24) }
 
-    private var renderedSentences: ArraySlice<SpeechSentence> {
-        let sentences = session.sentences
-        let count = sentences.count
-        guard count > 0 else { return sentences[...] }
-        if windowEnd > windowStart {
-            let start = min(max(0, windowStart), count)
-            let end = min(max(start, windowEnd), count)
-            return sentences[start..<end]
-        }
-        let range = defaultWindow(around: candidate ?? session.sentenceIndex, count: count)
-        return sentences[range]
-    }
-
     private func candidateLabel(_ index: Int) -> String {
         if let candidatePage { return "第 \(candidatePage) 页" }
         return "第 \(index + 1) 句"
@@ -121,7 +96,6 @@ struct SpeechSentenceList: View {
     private func chooseCenter(height: CGFloat) {
         if let nearest = frames.min(by: { abs($0.value.midY - height / 2) < abs($1.value.midY - height / 2) }) {
             candidate = nearest.key
-            ensureWindow(around: nearest.key)
         }
     }
 
@@ -138,38 +112,6 @@ struct SpeechSentenceList: View {
     private func follow(_ index: Int, proxy: ScrollViewProxy, height: CGFloat) {
         let anchor: UnitPoint = (frames[index]?.height ?? 0) > height ? .top : .center
         withAnimation(animation) { proxy.scrollTo(index, anchor: anchor) }
-    }
-
-    private func defaultWindow(around focus: Int, count: Int) -> Range<Int> {
-        let radius = 40
-        let start = max(0, focus - radius)
-        let end = min(count, focus + radius + 1)
-        return start..<end
-    }
-
-    private func ensureWindow(around focus: Int, resetting: Bool = false) {
-        let count = session.sentences.count
-        guard count > 0 else {
-            windowStart = 0
-            windowEnd = 0
-            return
-        }
-        let desired = defaultWindow(around: focus, count: count)
-        if resetting || windowEnd <= windowStart {
-            windowStart = desired.lowerBound
-            windowEnd = desired.upperBound
-            return
-        }
-        if browsing {
-            windowStart = min(windowStart, desired.lowerBound)
-            windowEnd = max(windowEnd, desired.upperBound)
-            return
-        }
-        let margin = 12
-        if focus < windowStart + margin || focus >= windowEnd - margin {
-            windowStart = desired.lowerBound
-            windowEnd = desired.upperBound
-        }
     }
 }
 
@@ -225,7 +167,6 @@ private struct SpeechSentenceRow: View {
                 }
             }
         }
-        .id(sentence.id)
     }
 }
 
