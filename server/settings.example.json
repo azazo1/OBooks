@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "listen": "127.0.0.1:8080",
+  "dataDirectory": "data",
+  "tlsCertificate": "",
+  "tlsKey": "",
+  "accessTokenSeconds": 900,
+  "refreshTokenSeconds": 2592000
+}

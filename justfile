@@ -28,3 +28,21 @@ clean:
 [macos]
 dist:
     ./scripts/dist-macos.sh
+
+# 构建 Go 同步服务端.
+server-build:
+    cd server && go build ./cmd/obooks-server
+
+# 测试 Go 同步服务端.
+server-test:
+    cd server && go test ./...
+
+# just server-run --settings settings.example.json
+# 启动 Go 同步服务端.
+server-run *args:
+    cd server && go run ./cmd/obooks-server serve {{args}}
+
+# just server-admin user-create --username reader
+# 管理同步服务账号.
+server-admin +args:
+    cd server && go run ./cmd/obooks-server {{args}}

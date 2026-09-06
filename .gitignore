@@ -2,3 +2,6 @@
 .references/
 dist/
 *.tmp
+server/data/
+server/obooks-server
+server/settings.json
