@@ -45,11 +45,16 @@ func runServe(logger *slog.Logger, opts *rootOptions, allowHTTP bool) error {
 	if s.TLSCertificate == "" && !allowHTTP && (ip == nil || !ip.IsLoopback()) {
 		return errors.New("非回环地址需要 TLS 或显式 --allow-http")
 	}
+	proxies, err := httpapi.NewTrustedProxies(s.TrustedProxies)
+	if err != nil {
+		return err
+	}
 	api := &httpapi.API{
-		Auth:   newAuthService(s, db),
-		Sync:   &syncservice.Service{DB: db},
-		Files:  &library.Store{DB: db, Root: filepath.Join(s.DataDirectory, "objects")},
-		Logger: logger,
+		Auth:           newAuthService(s, db),
+		Sync:           &syncservice.Service{DB: db},
+		Files:          &library.Store{DB: db, Root: filepath.Join(s.DataDirectory, "objects")},
+		Logger:         logger,
+		TrustedProxies: proxies,
 	}
 	server := &http.Server{
 		Addr:              s.Listen,

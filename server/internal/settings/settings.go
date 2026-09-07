@@ -15,10 +15,12 @@ type Settings struct {
 	TLSKey string `json:"tlsKey"`
 	AccessTokenSeconds int `json:"accessTokenSeconds"`
 	RefreshTokenSeconds int `json:"refreshTokenSeconds"`
+	// TrustedProxies 允许覆盖 X-Forwarded-For 的反代地址, 不写默认信任本机回环, 显式置空则完全不信任.
+	TrustedProxies []string `json:"trustedProxies"`
 }
 
 func Load(filename string) (Settings, error) {
-	s := Settings{SchemaVersion:1, Listen:"127.0.0.1:8080", DataDirectory:"data", AccessTokenSeconds:900, RefreshTokenSeconds:2592000}
+	s := Settings{SchemaVersion:1, Listen:"127.0.0.1:8080", DataDirectory:"data", AccessTokenSeconds:900, RefreshTokenSeconds:2592000, TrustedProxies: []string{"127.0.0.1/32", "::1/128"}}
 	if filename != "" {
 		file, err := os.Open(filename)
 		if err != nil { return s, err }

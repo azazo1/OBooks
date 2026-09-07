@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -85,14 +84,6 @@ func (l *attemptLimiter) charge(key string) (recorded, reached bool) {
 	}
 	l.attempts[key] = append(l.attempts[key], now)
 	return true, len(l.attempts[key]) >= l.perKey
-}
-
-func clientIP(r *http.Request) string {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
 }
 
 func isClientError(status int) bool {

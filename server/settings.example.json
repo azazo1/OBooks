@@ -5,5 +5,6 @@
   "tlsCertificate": "",
   "tlsKey": "",
   "accessTokenSeconds": 900,
-  "refreshTokenSeconds": 2592000
+  "refreshTokenSeconds": 2592000,
+  "trustedProxies": ["127.0.0.1/32", "::1/128"]
 }

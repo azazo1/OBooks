@@ -20,6 +20,7 @@ type API struct {
 	Sync *syncservice.Service
 	Files *library.Store
 	Logger *slog.Logger
+	TrustedProxies *TrustedProxies
 	logins *attemptLimiter
 	errors *attemptLimiter
 	loginSlots chan struct{}
@@ -83,7 +84,7 @@ func (a *API) protect(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		started := time.Now()
-		ip := clientIP(r)
+		ip := a.TrustedProxies.clientIP(r)
 		if r.URL.Path != "/healthz" && a.errors.blocked(ip) {
 			limited(w, "请求过于频繁")
 			a.Logger.Debug("请求完成", "method", r.Method, "path", r.URL.Path, "status", http.StatusTooManyRequests, "duration", time.Since(started))
@@ -139,7 +140,7 @@ func (a *API) authorized(next func(http.ResponseWriter, *http.Request, auth.Iden
 }
 
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
-	if recorded, _ := a.logins.charge(clientIP(r)); !recorded {
+	if recorded, _ := a.logins.charge(a.TrustedProxies.clientIP(r)); !recorded {
 		limited(w, "登录请求过于频繁")
 		return
 	}
