@@ -33,7 +33,7 @@ jobs:
       build_version: ${{ steps.build_version.outputs.build_version }}
     steps:
       - name: 检出当前 ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -135,7 +135,7 @@ jobs:
             swift_triple: x86_64-apple-macosx14.0
     steps:
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
@@ -148,7 +148,7 @@ jobs:
           swift --version
 
       - name: 恢复 SwiftPM 缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -166,7 +166,7 @@ jobs:
         run: ./scripts/dist-macos.sh
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: OBooks-${{ needs.version.outputs.build_version }}-macos-${{ matrix.arch }}
           path: dist/OBooks-${{ needs.version.outputs.build_version }}-macos-${{ matrix.arch }}.dmg
@@ -179,7 +179,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
@@ -192,7 +192,7 @@ jobs:
           swift --version
 
       - name: 恢复 SwiftPM 缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -213,13 +213,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
@@ -271,13 +271,13 @@ jobs:
             ext: tar.gz
     steps:
       - name: 检出目标提交
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
@@ -293,7 +293,7 @@ jobs:
         run: ./scripts/dist-server.sh
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: obooks-server-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/obooks-server-${{ needs.version.outputs.build_version }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.ext }}
@@ -314,7 +314,7 @@ jobs:
       contents: write
     steps:
       - name: 检出发布 tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.version.outputs.source_ref }}
           fetch-depth: 0
@@ -362,7 +362,7 @@ jobs:
           fi
 
       - name: 下载构建产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-artifacts
           merge-multiple: true
