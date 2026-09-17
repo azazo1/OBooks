@@ -86,6 +86,12 @@ final class AppModel: ObservableObject {
         }
         sync.attach(to: self, observeLifecycle: observeLifecycle)
         guard observeLifecycle else { return }
+        ExternalFileOpenInbox.shared.attach { [weak self] urls in
+            guard let self else { return }
+            for url in urls {
+                self.importEPUB(at: url)
+            }
+        }
         terminationObservation = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -118,7 +124,13 @@ final class AppModel: ObservableObject {
     }
 
     func importEPUB(at url: URL) {
+        let accessed = url.startAccessingSecurityScopedResource()
         Task { @MainActor in
+          defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+          }
           do {
             let store = libraryStore
             var book = try await Task.detached(priority: .userInitiated) { try EPUBImporter(store: store).importBook(from: url) }.value

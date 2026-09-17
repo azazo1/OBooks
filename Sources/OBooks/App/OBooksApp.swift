@@ -10,6 +10,10 @@ struct OBooksApp: App {
         WindowGroup("OBooks") {
             LibraryView()
                 .environmentObject(appModel)
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                .onOpenURL { url in
+                    ExternalFileOpenInbox.shared.enqueue([url])
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultPosition(.center)

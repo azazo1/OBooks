@@ -106,6 +106,31 @@ printf '%s\n' \
     "    <string>$build_number</string>" \
     '    <key>CFBundleDisplayVersion</key>' \
     "    <string>$display_version</string>" \
+    '    <key>CFBundleDocumentTypes</key>' \
+    '    <array>' \
+    '        <dict>' \
+    '            <key>CFBundleTypeExtensions</key>' \
+    '            <array>' \
+    '                <string>epub</string>' \
+    '            </array>' \
+    '            <key>CFBundleTypeIconFile</key>' \
+    '            <string>AppIcon</string>' \
+    '            <key>CFBundleTypeMIMETypes</key>' \
+    '            <array>' \
+    '                <string>application/epub+zip</string>' \
+    '            </array>' \
+    '            <key>CFBundleTypeName</key>' \
+    '            <string>EPUB 电子书</string>' \
+    '            <key>CFBundleTypeRole</key>' \
+    '            <string>Viewer</string>' \
+    '            <key>LSHandlerRank</key>' \
+    '            <string>Alternate</string>' \
+    '            <key>LSItemContentTypes</key>' \
+    '            <array>' \
+    '                <string>org.idpf.epub-container</string>' \
+    '            </array>' \
+    '        </dict>' \
+    '    </array>' \
     '    <key>LSMinimumSystemVersion</key>' \
     '    <string>14.0</string>' \
     '    <key>NSHighResolutionCapable</key>' \

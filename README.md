@@ -5,6 +5,7 @@ OBooks 是一个面向 macOS 的 EPUB 阅读器初版. 当前重点是验证阅�
 ## 当前能力
 
 - 导入无 DRM 的 EPUB 2 / EPUB 3 文件.
+- 在 Finder 中通过打开方式把 EPUB 交给 OBooks 导入.
 - 解析书名, 作者, 封面, spine 和 EPUB 3 nav / EPUB 2 NCX 目录.
 - 将导入内容复制到 Application Support, 不依赖原始文件位置.
 - 使用 AppKit TextKit 原生渲染章节正文, 不依赖 HTML 阅读视图.
